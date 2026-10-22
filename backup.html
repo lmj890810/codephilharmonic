@@ -1,0 +1,3868 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>代码有声 CodePhilharmonic · 把你的代码变成一首曲子</title>
+<meta name="description" content="粘贴任意代码，自动谱成一首曲子。缩进决定音高，符号决定节奏，空行是呼吸。" />
+<style>
+/* ── 基础 ───────────────────────────────────────────── */
+:root {
+  --bg: #0a0d14;
+  --bg-panel: rgba(19, 24, 35, 0.78);
+  --border: rgba(120, 160, 200, 0.14);
+  --border-bright: rgba(120, 200, 190, 0.34);
+  --text: #dce4f0;
+  --text-dim: #6b7a8f;
+  --text-mid: #98a8bd;
+  --accent: #58d6be;
+  --accent-2: #7cb4ff;
+  --accent-3: #be96ff;
+  --warn: #ffb86b;
+  --radius: 14px;
+  --mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, "Cascadia Code", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+/* 桌面端：锁定一屏，内部面板各自滚动。
+   移动端由下面的媒体查询放开，改成整页滚动 —— 否则超出屏幕的内容无法触达。 */
+html, body { height: 100%; overflow: hidden; }
+
+/* 背景光晕：让深色界面不死板 */
+.bg-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 0%, rgba(88, 214, 190, 0.10), transparent 60%),
+    radial-gradient(ellipse 50% 45% at 88% 8%, rgba(124, 180, 255, 0.10), transparent 62%),
+    radial-gradient(ellipse 70% 40% at 50% 100%, rgba(190, 150, 255, 0.07), transparent 65%);
+  z-index: 0;
+}
+
+.hidden { display: none !important; }
+
+/* ── 顶栏 ───────────────────────────────────────────── */
+.topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 26px;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
+.brand { display: flex; align-items: baseline; gap: 10px; }
+
+.brand-mark {
+  font-size: 22px;
+  color: var(--accent);
+  text-shadow: 0 0 18px rgba(88, 214, 190, 0.6);
+  animation: pulse-mark 3.4s ease-in-out infinite;
+}
+
+@keyframes pulse-mark {
+  0%, 100% { opacity: 0.75; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+
+.brand-name {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.brand-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+}
+
+.topbar-actions { display: flex; gap: 8px; }
+
+.ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  color: var(--text-mid);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.18s;
+  font-family: inherit;
+}
+
+.ghost-btn:hover {
+  color: var(--text);
+  border-color: var(--border-bright);
+  background: rgba(88, 214, 190, 0.08);
+}
+
+.ghost-btn .ico { font-size: 13px; opacity: 0.8; }
+
+.export-btn {
+  padding: 9px 12px;
+  font-size: 12px;
+}
+
+.export-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* ── 布局 ───────────────────────────────────────────── */
+.stage {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  gap: 16px;
+  padding: 16px 20px 20px;
+  height: calc(100vh - 57px);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-mid);
+  text-transform: uppercase;
+}
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.dot-alt {
+  background: var(--accent-2);
+  box-shadow: 0 0 10px var(--accent-2);
+}
+
+.panel-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+.panel-meta .sep { margin: 0 6px; opacity: 0.4; }
+
+/* ── 编辑器 ─────────────────────────────────────────── */
+.editor-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#source {
+  width: 100%;
+  height: 100%;
+  padding: 16px 18px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.85;
+  tab-size: 2;
+  caret-color: var(--accent);
+}
+
+#source::placeholder { color: #3d4a5c; }
+
+#source:focus {
+  background: rgba(88, 214, 190, 0.015);
+}
+
+/* 播放时的代码视图 */
+.code-view {
+  position: absolute;
+  inset: 0;
+  padding: 16px 18px;
+  overflow-y: auto;
+  background: linear-gradient(180deg, rgba(10, 13, 20, 0.97), rgba(10, 13, 20, 0.99));
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.85;
+  scroll-behavior: smooth;
+}
+
+.code-view::-webkit-scrollbar { width: 6px; }
+.code-view::-webkit-scrollbar-thumb {
+  background: rgba(120, 160, 200, 0.22);
+  border-radius: 3px;
+}
+
+.cl-row {
+  display: flex;
+  gap: 12px;
+  padding: 0 6px;
+  border-radius: 5px;
+  transition: background 0.25s, opacity 0.3s;
+  opacity: 0.34;
+}
+
+.cl-row.is-active {
+  background: rgba(88, 214, 190, 0.07);
+  box-shadow: inset 2px 0 0 var(--accent);
+  opacity: 1;
+}
+
+.cl-gutter {
+  flex-shrink: 0;
+  color: #33404f;
+  user-select: none;
+  font-size: 11.5px;
+}
+
+.cl-row.is-active .cl-gutter { color: var(--accent); opacity: 0.65; }
+
+.cl-body { white-space: pre; flex: 1; }
+
+/* 语法着色 */
+.tk-keyword { color: #ff9d8a; }
+.tk-ident   { color: #cfe0f5; }
+.tk-number  { color: #ffd479; }
+.tk-string  { color: #9ddfa3; }
+.tk-comment { color: #4d5c6e; font-style: italic; }
+.tk-punct   { color: #7f93a8; }
+
+/* 命中的 token：发光 */
+.tk.is-hit {
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(88, 214, 190, 0.95), 0 0 3px rgba(88, 214, 190, 0.8);
+  transition: color 0.06s, text-shadow 0.06s;
+}
+
+/* ── 分析条 ─────────────────────────────────────────── */
+.analyze {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--border);
+  background: rgba(88, 214, 190, 0.02);
+  flex-shrink: 0;
+}
+
+.an-item {
+  padding: 9px 12px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.an-item:last-child { border-right: none; }
+
+.an-key {
+  font-size: 9.5px;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+
+.an-val {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-mid);
+  font-weight: 500;
+}
+
+/* ── 底部控制 ───────────────────────────────────────── */
+.panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #061014;
+  background: linear-gradient(135deg, var(--accent), #5fe0ff);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 18px rgba(88, 214, 190, 0.26);
+  white-space: nowrap;
+}
+
+.primary-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 24px rgba(88, 214, 190, 0.4);
+}
+
+.primary-btn:active { transform: translateY(0); }
+.primary-btn .ico { font-size: 11px; }
+
+.style-picker {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.style-chip {
+  padding: 6px 11px;
+  font-size: 11.5px;
+  font-family: inherit;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.16s;
+  white-space: nowrap;
+}
+
+.style-chip:hover {
+  color: var(--text-mid);
+  border-color: rgba(120, 160, 200, 0.3);
+}
+
+.style-chip.is-on {
+  color: var(--accent);
+  border-color: var(--border-bright);
+  background: rgba(88, 214, 190, 0.1);
+}
+
+/* ── 演奏面板 ───────────────────────────────────────── */
+.now-head {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.np-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.26em;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+
+.np-title {
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  background: linear-gradient(100deg, #ffffff, var(--accent) 45%, var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.np-sub {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 11px;
+}
+
+.np-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  padding: 3px 9px;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  color: var(--accent);
+  background: rgba(88, 214, 190, 0.08);
+  border: 1px solid rgba(88, 214, 190, 0.2);
+  border-radius: 5px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.viz-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 180px;
+  overflow: hidden;
+}
+
+.spectrum {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 22px 12px;
+  flex-shrink: 0;
+}
+
+.progress-bar {
+  height: 3px;
+  background: rgba(120, 160, 200, 0.13);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  border-radius: 2px;
+  transition: width 0.1s linear;
+  box-shadow: 0 0 12px rgba(88, 214, 190, 0.7);
+}
+
+.progress-time {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+
+/* 传输控制 */
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.round-btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), #5fe0ff);
+  color: #061014;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 16px rgba(88, 214, 190, 0.3);
+  flex-shrink: 0;
+}
+
+.round-btn:hover { transform: scale(1.06); }
+.round-btn:active { transform: scale(0.97); }
+
+.round-btn.ghost {
+  width: 38px;
+  height: 38px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  box-shadow: none;
+  font-size: 15px;
+}
+
+.round-btn.ghost:hover {
+  border-color: var(--border-bright);
+  color: var(--accent);
+}
+
+.vol {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+#volume {
+  width: 84px;
+  height: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(120, 160, 200, 0.18);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 9px rgba(88, 214, 190, 0.8);
+  cursor: pointer;
+}
+
+/* 数据条 */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.stat {
+  padding: 13px 16px;
+  border-right: 1px solid var(--border);
+  text-align: center;
+}
+
+.stat:last-child { border-right: none; }
+
+.stat-val {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  margin-bottom: 3px;
+}
+
+.stat-key {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+
+/* ── 映射图例 ───────────────────────────────────────── */
+.legend {
+  padding: 15px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(88, 214, 190, 0.018);
+  flex-shrink: 0;
+}
+
+.legend-title {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  font-family: var(--mono);
+}
+
+.legend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 9px 20px;
+  margin-bottom: 13px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+}
+
+.lg-key {
+  color: var(--text);
+  font-weight: 600;
+  min-width: 42px;
+}
+
+.lg-arrow {
+  color: var(--accent);
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+.lg-val {
+  color: var(--text-dim);
+}
+
+.legend-voices {
+  display: flex;
+  gap: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(120, 160, 200, 0.1);
+}
+
+.voice {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.voice i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: block;
+}
+
+/* ── 弹窗 ───────────────────────────────────────────── */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 6, 10, 0.82);
+  backdrop-filter: blur(6px);
+  padding: 24px;
+  animation: fade-in 0.2s ease;
+}
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-card {
+  position: relative;
+  max-width: 540px;
+  width: 100%;
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 30px 32px 28px;
+  background: linear-gradient(160deg, #151b26, #10141c);
+  border: 1px solid var(--border-bright);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+  animation: rise-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.16s;
+}
+
+.modal-close:hover { color: var(--text); border-color: var(--border-bright); }
+
+.modal-card h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.modal-lead {
+  margin: 0 0 22px;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.rule-list {
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.rule-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 14px;
+  border-left: 2px solid rgba(88, 214, 190, 0.28);
+}
+
+.rule-list b {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rule-list span {
+  font-size: 12.5px;
+  color: var(--text-mid);
+  line-height: 1.65;
+}
+
+.rule-list code {
+  padding: 1px 5px;
+  background: rgba(255, 157, 138, 0.1);
+  border-radius: 4px;
+  color: #ff9d8a;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.modal-note {
+  padding: 13px 15px;
+  background: rgba(88, 214, 190, 0.06);
+  border: 1px solid rgba(88, 214, 190, 0.18);
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--text-mid);
+  line-height: 1.65;
+}
+
+/* ── 响应式 ─────────────────────────────────────────── */
+@media (max-width: 1080px) {
+  /* 单列布局：页面本身滚动，height:100% + overflow:hidden 必须解除，
+     否则超出一屏的内容既看不见也滚不到。 */
+  html, body {
+    height: auto;
+    min-height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    height: auto;
+    min-height: calc(100vh - 57px);
+    align-items: start;
+  }
+  .panel-code { min-height: 480px; }
+  /* 演奏面板的 canvas 依赖父级有确定高度；用 min-height 而不是 flex 撑开，
+     否则 canvas 会被压成 0 高，画面看不见。 */
+  .panel-play { min-height: 560px; }
+  .viz-wrap { min-height: 240px; }
+  .np-title { font-size: 21px; }
+}
+
+@media (max-width: 640px) {
+  .topbar { padding: 11px 14px; }
+  .brand-sub { display: none; }
+  .stage {
+    padding: 10px;
+    gap: 10px;
+    min-height: 0;
+    height: auto;
+    /* 两个面板各自按内容高度排列，不再等高拉伸 */
+    grid-template-rows: auto auto;
+    align-items: start;
+  }
+  /* 手机上面板不能是 flex-column + overflow:hidden 的组合，
+     那会把内部区块裁掉。改成按内容自然排列。 */
+  .panel { overflow: visible; }
+  .panel-play { display: block; }
+  .panel-code { display: block; }
+
+  .style-picker { margin-left: 0; width: 100%; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat:nth-child(2) { border-right: none; }
+  .stat:nth-child(1), .stat:nth-child(2) { border-bottom: 1px solid var(--border); }
+
+  .editor-wrap { height: 240px; min-height: 0; max-height: none; }
+
+  /* 演奏面板让每个区块自然展开 */
+  .viz-wrap { height: 220px; min-height: 0; flex: none; }
+
+  .np-title { font-size: 19px; }
+  .now-head { padding: 14px 16px 12px; }
+
+  .legend { padding: 12px 16px 14px; }
+  .legend-grid { grid-template-columns: 1fr; gap: 7px; }
+  .legend-voices { gap: 10px; flex-wrap: wrap; }
+
+  .analyze { grid-template-columns: repeat(2, 1fr); }
+  .an-item:nth-child(2) { border-right: none; }
+  .an-item:nth-child(1), .an-item:nth-child(2) { border-bottom: 1px solid var(--border); }
+
+  .panel-foot { gap: 8px; padding: 10px 12px; }
+  .primary-btn { padding: 9px 14px; font-size: 12.5px; }
+  .export-btn { padding: 8px 10px; font-size: 11px; }
+  .transport { padding: 12px 16px; }
+  .progress { padding: 0 16px 10px; }
+}
+
+</style>
+</head>
+<body>
+
+<div class="bg-glow" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">♪</span>
+    <span class="brand-name">代码有声</span>
+    <span class="brand-sub">CodePhilharmonic</span>
+  </div>
+  <div class="topbar-actions">
+    <button id="btn-shuffle" class="ghost-btn" title="随机换一段代码">
+      <span class="ico">⟳</span> 换一段
+    </button>
+    <button id="btn-help" class="ghost-btn" title="查看说明">
+      <span class="ico">?</span> 它怎么工作的
+    </button>
+  </div>
+</header>
+
+<main class="stage">
+
+  <!-- 左：代码输入与歌词般滚动的代码 -->
+  <section class="panel panel-code">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="dot"></span>
+        源代码
+      </div>
+      <div class="panel-meta">
+        <span id="meta-lines">— 行</span>
+        <span class="sep">/</span>
+        <span id="meta-notes">— 音符</span>
+      </div>
+    </div>
+
+    <div class="editor-wrap">
+      <textarea id="source" spellcheck="false" autocomplete="off"
+        placeholder="在这里粘贴你的代码……&#10;&#10;缩进越深，音越高；&#10;空行会让曲子喘口气。"></textarea>
+      <div id="code-view" class="code-view hidden" aria-hidden="true"></div>
+    </div>
+
+    <!-- 分析条：随代码变化更新，把映射结果量化给人看 -->
+    <div class="analyze">
+      <div class="an-item">
+        <span class="an-key">最深缩进</span>
+        <span class="an-val" id="an-indent">—</span>
+      </div>
+      <div class="an-item">
+        <span class="an-key">音域跨度</span>
+        <span class="an-val" id="an-range">—</span>
+      </div>
+      <div class="an-item">
+        <span class="an-key">注释占比</span>
+        <span class="an-val" id="an-comment">—</span>
+      </div>
+      <div class="an-item">
+        <span class="an-key">平均力度</span>
+        <span class="an-val" id="an-vel">—</span>
+      </div>
+    </div>
+
+    <div class="panel-foot">
+      <button id="btn-compose" class="primary-btn">
+        <span class="ico">▶</span>
+        <span>谱曲并播放</span>
+      </button>
+      <button id="btn-poster" class="ghost-btn export-btn" title="导出一张可以分享的乐谱海报">
+        <span class="ico">⬒</span> 海报
+      </button>
+      <button id="btn-audio" class="ghost-btn export-btn" title="把这首曲子下载成 WAV">
+        <span class="ico">⤓</span> WAV
+      </button>
+      <div class="style-picker" id="style-picker" role="group" aria-label="曲风">
+        <button class="style-chip is-on" data-style="auto">自动</button>
+        <button class="style-chip" data-style="lofi">Lo-fi</button>
+        <button class="style-chip" data-style="piano">钢琴</button>
+        <button class="style-chip" data-style="eightbit">8-bit</button>
+        <button class="style-chip" data-style="ambient">氛围</button>
+        <button class="style-chip" data-style="synthwave">合成器</button>
+      </div>
+    </div>
+
+    <!-- 映射图例：填满下方留白，同时把「代码→音乐」的因果关系摆出来 -->
+    <div class="legend">
+      <div class="legend-title">这片声音是这么来的</div>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <span class="lg-key">缩进</span>
+          <span class="lg-arrow">→</span>
+          <span class="lg-val">音高 · 越深越高</span>
+        </div>
+        <div class="legend-item">
+          <span class="lg-key">标识符</span>
+          <span class="lg-arrow">→</span>
+          <span class="lg-val">音级 · 同名同音</span>
+        </div>
+        <div class="legend-item">
+          <span class="lg-key">关键字</span>
+          <span class="lg-arrow">→</span>
+          <span class="lg-val">重音 · 更亮更响</span>
+        </div>
+        <div class="legend-item">
+          <span class="lg-key">空行</span>
+          <span class="lg-arrow">→</span>
+          <span class="lg-val">呼吸 · 休止与延音</span>
+        </div>
+      </div>
+      <div class="legend-voices">
+        <span class="voice"><i style="background:#58d6be"></i>旋律</span>
+        <span class="voice"><i style="background:#7cb4ff"></i>和声</span>
+        <span class="voice"><i style="background:#be96ff"></i>低音</span>
+        <span class="voice"><i style="background:#78b4ff;opacity:.6"></i>鼓点</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 右：演奏区 -->
+  <section class="panel panel-play">
+    <div class="now-head">
+      <div class="np-label">NOW PLAYING</div>
+      <div class="np-title" id="np-title">等待谱曲</div>
+      <div class="np-sub" id="np-sub">粘贴代码后点击「谱曲并播放」</div>
+      <div class="np-tags">
+        <span class="tag" id="meta-style">—</span>
+        <span class="tag" id="meta-bpm">— BPM</span>
+        <span class="tag" id="stat-key">—</span>
+      </div>
+    </div>
+
+    <div class="viz-wrap">
+      <canvas id="spectrum" class="spectrum"></canvas>
+    </div>
+
+    <div class="progress">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-time"><span id="time-cur">0:00</span> / <span id="time-total">0:00</span></div>
+    </div>
+
+    <div class="transport">
+      <button id="btn-play" class="round-btn" aria-label="播放">
+        <span id="play-glyph">▶</span>
+      </button>
+      <button id="btn-restart" class="round-btn ghost" aria-label="重播">⟲</button>
+      <div class="vol">
+        <span class="ico">🔊</span>
+        <input id="volume" type="range" min="0" max="100" value="85" />
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-val" id="stat-lines">0</div>
+        <div class="stat-key">代码行</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="stat-notes">0</div>
+        <div class="stat-key">音符</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="stat-dur">0:00</div>
+        <div class="stat-key">时长</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="stat-bars">0</div>
+        <div class="stat-key">小节</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- 说明弹窗 -->
+<div id="help-modal" class="modal hidden">
+  <div class="modal-card">
+    <button class="modal-close" id="help-close" aria-label="关闭">✕</button>
+    <h2>它怎么把代码变成音乐的</h2>
+    <p class="modal-lead">不是随机噪声。每一行代码都真的决定了什么。</p>
+    <ol class="rule-list">
+      <li>
+        <b>缩进 = 音高</b>
+        <span>函数体里的代码音更高，越往深处走旋律越往上爬。所以你看到的是一个「结构」在发声。</span>
+      </li>
+      <li>
+        <b>标识符 = 音级</b>
+        <span>每个变量名经过哈希映射到音阶上的一个固定位置。同一个名字，永远是同一个音。</span>
+      </li>
+      <li>
+        <b>关键字 = 重音</b>
+        <span><code>if</code> <code>return</code> <code>for</code> 这些词会更响、更高一档，成为节奏的骨架。</span>
+      </li>
+      <li>
+        <b>空行 = 呼吸</b>
+        <span>空行是休止，注释行是延音。写代码时留的白，决定了这首曲子喘不喘得过气。</span>
+      </li>
+      <li>
+        <b>嵌套 = 节奏密度</b>
+        <span>缩进层级变化会触发鼓点，离开代码块的瞬间有一个军鼓收尾。</span>
+      </li>
+    </ol>
+    <div class="modal-note">
+      所有音都取自固定调式音阶，和声走预设进行 —— 所以无论你贴什么代码，都不会难听。
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== lexer.js ===== */
+/**
+ * 词法分析器：把源码切成带结构信息的 token 流。
+ * 音乐映射只关心「这一行长什么样」，不关心语义正确性，
+ * 所以这里做的是容错扫描而不是真正的语法分析。
+ */
+
+const KEYWORDS = new Set([
+  'function', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case',
+  'break', 'continue', 'const', 'let', 'var', 'class', 'new', 'this', 'super',
+  'import', 'export', 'from', 'default', 'async', 'await', 'try', 'catch',
+  'finally', 'throw', 'typeof', 'instanceof', 'in', 'of', 'yield', 'delete',
+  'void', 'null', 'undefined', 'true', 'false', 'def', 'elif', 'lambda',
+  'public', 'private', 'protected', 'static', 'struct', 'enum', 'impl', 'fn',
+  'func', 'package', 'interface', 'extends', 'implements',
+]);
+
+const CONTROL_FLOW = new Set([
+  'if', 'else', 'for', 'while', 'switch', 'case', 'try', 'catch', 'return',
+  'break', 'continue', 'throw', 'yield', 'await',
+]);
+
+// 这些符号会被当作「打击乐」：它们本身是短促的视觉符号
+const PUNCT = new Set([
+  '(', ')', '{', '}', '[', ']', ';', ',', '.', ':', '?', '=>', '->',
+  '+', '-', '*', '/', '%', '=', '==', '===', '!=', '!==', '<', '>',
+  '<=', '>=', '&&', '||', '!', '&', '|', '^', '~', '+=', '-=', '*=',
+  '/=', '++', '--', '...', '@', '#', '\\',
+]);
+
+const TOKEN = {
+  KEYWORD: 'keyword',
+  IDENT: 'ident',
+  NUMBER: 'number',
+  STRING: 'string',
+  COMMENT: 'comment',
+  PUNCT: 'punct',
+  SPACE: 'space',
+};
+
+/**
+ * 单行扫描。返回 token 数组，每个 token 带 type / value / start / end。
+ *
+ * blockState 用于跨行块注释：进入 `/*` 后，后续行整体是注释，
+ * 直到遇到 `*\/`。不传就当作新的一行处理。
+ */
+function scanLine(text, offset = 0, blockState = null) {
+  const tokens = [];
+  let i = 0;
+
+  // 上一行遗留的块注释状态
+  if (blockState && blockState.inComment) {
+    const close = text.indexOf('*/');
+    if (close === -1) {
+      tokens.push({
+        type: TOKEN.COMMENT, value: text, start: offset, end: offset + text.length,
+      });
+      return tokens;
+    }
+    const end = close + 2;
+    tokens.push({
+      type: TOKEN.COMMENT, value: text.slice(0, end), start: offset, end: offset + end,
+    });
+    blockState.inComment = false;
+    i = end;
+  }
+
+  while (i < text.length) {
+    const ch = text[i];
+    const rest = text.slice(i);
+
+    // 行注释
+    if (rest.startsWith('//') || rest.startsWith('#')) {
+      tokens.push({
+        type: TOKEN.COMMENT, value: rest, start: offset + i, end: offset + text.length,
+      });
+      break;
+    }
+
+    // 块注释开始
+    if (rest.startsWith('/*')) {
+      const close = text.indexOf('*/', i + 2);
+      if (close === -1) {
+        // 这一行没闭合，标记状态，让后面的行继续当注释
+        tokens.push({
+          type: TOKEN.COMMENT,
+          value: text.slice(i),
+          start: offset + i,
+          end: offset + text.length,
+        });
+        if (blockState) blockState.inComment = true;
+        break;
+      }
+      const end = close + 2;
+      tokens.push({
+        type: TOKEN.COMMENT, value: text.slice(i, end), start: offset + i, end: offset + end,
+      });
+      i = end;
+      continue;
+    }
+
+    // 字符串
+    if (ch === '"' || ch === "'" || ch === '`') {
+      let j = i + 1;
+      while (j < text.length) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === ch) { j++; break; }
+        j++;
+      }
+      tokens.push({
+        type: TOKEN.STRING, value: text.slice(i, j), start: offset + i, end: offset + j,
+      });
+      i = j;
+      continue;
+    }
+
+    // 数字
+    if (/[0-9]/.test(ch)) {
+      let j = i;
+      while (j < text.length && /[0-9a-fA-FxX._]/.test(text[j])) j++;
+      tokens.push({
+        type: TOKEN.NUMBER, value: text.slice(i, j), start: offset + i, end: offset + j,
+      });
+      i = j;
+      continue;
+    }
+
+    // 标识符 / 关键字
+    if (/[A-Za-z_$\u4e00-\u9fa5]/.test(ch)) {
+      let j = i;
+      while (j < text.length && /[A-Za-z0-9_$\u4e00-\u9fa5]/.test(text[j])) j++;
+      const word = text.slice(i, j);
+      tokens.push({
+        type: KEYWORDS.has(word) ? TOKEN.KEYWORD : TOKEN.IDENT,
+        value: word,
+        start: offset + i,
+        end: offset + j,
+      });
+      i = j;
+      continue;
+    }
+
+    // 空白
+    if (/\s/.test(ch)) {
+      let j = i;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      tokens.push({
+        type: TOKEN.SPACE, value: text.slice(i, j), start: offset + i, end: offset + j,
+      });
+      i = j;
+      continue;
+    }
+
+    // 运算符：优先匹配双字符 / 三字符
+    const three = text.slice(i, i + 3);
+    const two = text.slice(i, i + 2);
+    if (['===', '!==', '...'].includes(three)) {
+      tokens.push({ type: TOKEN.PUNCT, value: three, start: offset + i, end: offset + i + 3 });
+      i += 3;
+      continue;
+    }
+    if (['==', '!=', '<=', '>=', '&&', '||', '=>', '->', '+=', '-=', '*=', '/=', '++', '--'].includes(two)) {
+      tokens.push({ type: TOKEN.PUNCT, value: two, start: offset + i, end: offset + i + 2 });
+      i += 2;
+      continue;
+    }
+
+    tokens.push({ type: TOKEN.PUNCT, value: ch, start: offset + i, end: offset + i + 1 });
+    i++;
+  }
+
+  return tokens;
+}
+
+/**
+ * 把源码切成「乐句行」。
+ *
+ * 关键设计：空行和纯注释行不是丢弃，而是保留为「呼吸」——
+ * 它们让音乐有留白，这是让生成的曲子不像机器轰炸的关键。
+ */
+function tokenize(source) {
+  const rawLines = source.split(/\r?\n/);
+  const result = [];
+  let offset = 0;
+  const blockState = { inComment: false };
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i];
+    const lead = raw.match(/^[ \t]*/)[0];
+    // tab 按 4 空格折算，这样不同编辑器写出来的代码缩进可比
+    const indent = lead.replace(/\t/g, '    ').length;
+    const body = raw.slice(lead.length);
+    const tokens = scanLine(body, offset + lead.length, blockState);
+
+    const meaningful = tokens.filter(
+      (t) => t.type !== TOKEN.SPACE && t.type !== TOKEN.COMMENT,
+    );
+    const hasComment = tokens.some((t) => t.type === TOKEN.COMMENT);
+
+    result.push({
+      lineNo: i,
+      raw,
+      indent,
+      tokens,
+      meaningful,
+      hasComment,
+      isBlank: meaningful.length === 0,
+      isCommentOnly: meaningful.length === 0 && hasComment,
+    });
+
+    offset += raw.length + 1;
+  }
+
+  return result;
+}
+
+/** 稳定的字符串哈希，用来让同一个标识符每次都映射到同一个音级。 */
+function hashString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+window.CodeLexer = {
+  tokenize,
+  hashString,
+  TOKEN,
+  KEYWORDS,
+  CONTROL_FLOW,
+};
+
+
+/* ===== composer.js ===== */
+/**
+ * 音乐映射层：把 token 流翻译成音符事件。
+ *
+ * 设计原则（这是整个作品成不成立的关键）：
+ *
+ * 1. 绝不跑调。所有音都取自固定调式音阶，而且弦外音一律吸附到最近的音阶音。
+ * 2. 和声是预设的循环进行，不是自由生成。代码只决定「用哪些音、什么时候响」，
+ *    不决定「和弦怎么走」。这样任何代码都落在调内。
+ * 3. 缩进决定音高，标识符哈希决定具体音级，字符决定节奏时值。
+ *    三层独立，所以同一行代码既有结构感又不呆板。
+ * 4. 空行和注释行是休止与延音，不是噪音。留白决定了音乐好不好听。
+ */
+
+// ── 调式 ────────────────────────────────────────────────────────────
+// 五声音阶：怎么组合都不会出现小二度冲突，是「代码乱映射也不难听」的保险
+const SCALES = {
+  pentatonicMajor: [0, 2, 4, 7, 9],
+  pentatonicMinor: [0, 3, 5, 7, 10],
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  dorian: [0, 2, 3, 5, 7, 9, 10],
+  lydian: [0, 2, 4, 6, 7, 9, 11],
+};
+
+// 和弦进行用级数表示（0 起），配合调式取音
+// 每套风格有自己偏好的进行，改风格等于换情绪
+const PROGRESSIONS = {
+  lofi:     [[0, 2, 4], [5, 0, 2], [3, 5, 0], [4, 6, 1]],
+  piano:    [[0, 2, 4], [4, 6, 1], [5, 0, 2], [3, 5, 0]],
+  eightbit: [[0, 2, 4], [3, 5, 0], [4, 6, 1], [5, 0, 2]],
+  ambient:  [[0, 2, 4], [1, 3, 5], [0, 2, 4], [2, 4, 6]],
+  synthwave:[[0, 2, 4], [5, 0, 2], [3, 5, 0], [4, 6, 1]],
+};
+
+const STYLES = {
+  lofi: {
+    name: 'Lo-fi 夜曲',
+    root: 57,            // A3
+    scale: 'pentatonicMinor',
+    bpm: 76,
+    swing: 0.12,
+    barsPerChord: 1,
+    beatsPerBar: 4,
+    padOctave: -1,
+    leadOctave: 1,
+    velocityBase: 0.55,
+    drumPattern: 'lofi',
+  },
+  piano: {
+    name: '钢琴独奏',
+    root: 60,            // C4
+    scale: 'major',
+    bpm: 92,
+    swing: 0,
+    barsPerChord: 2,
+    beatsPerBar: 4,
+    padOctave: 0,
+    leadOctave: 1,
+    velocityBase: 0.5,
+    drumPattern: null,
+  },
+  eightbit: {
+    name: '8-bit 芯片',
+    root: 60,
+    scale: 'major',
+    bpm: 138,
+    swing: 0,
+    barsPerChord: 1,
+    beatsPerBar: 4,
+    padOctave: -1,
+    leadOctave: 1,
+    velocityBase: 0.6,
+    drumPattern: 'chip',
+  },
+  ambient: {
+    name: '氛围铺底',
+    root: 55,            // G3
+    scale: 'lydian',
+    bpm: 62,
+    swing: 0,
+    barsPerChord: 2,
+    beatsPerBar: 4,
+    padOctave: -1,
+    leadOctave: 1,
+    velocityBase: 0.45,
+    drumPattern: null,
+  },
+  synthwave: {
+    name: '合成器浪潮',
+    root: 57,
+    scale: 'dorian',
+    bpm: 112,
+    swing: 0,
+    barsPerChord: 1,
+    beatsPerBar: 4,
+    padOctave: -1,
+    leadOctave: 1,
+    velocityBase: 0.62,
+    drumPattern: 'wave',
+  },
+};
+
+/** 把半音数吸附到调式音阶内，保证永远在调上。 */
+function snapToScale(semitone, scaleIntervals) {
+  const octave = Math.floor(semitone / 12);
+  const pc = ((semitone % 12) + 12) % 12;
+  let best = scaleIntervals[0];
+  let bestDist = 12;
+  for (const s of scaleIntervals) {
+    const d = Math.abs(s - pc);
+    if (d < bestDist) { bestDist = d; best = s; }
+  }
+  return octave * 12 + best;
+}
+
+/** 级数 → 半音，超出音阶长度时自动升八度。 */
+function degreeToSemitone(degree, scaleIntervals) {
+  const len = scaleIntervals.length;
+  const oct = Math.floor(degree / len);
+  const idx = ((degree % len) + len) % len;
+  return oct * 12 + scaleIntervals[idx];
+}
+
+/**
+ * 分析代码的整体「气质」，用来挑选风格默认值。
+ * 这不是必须的，用户始终可以手动改。
+ */
+function detectMood(lines) {
+  const text = lines.map((l) => l.raw).join('\n').toLowerCase();
+  let control = 0;
+  let comments = 0;
+  let total = 0;
+
+  for (const l of lines) {
+    if (l.isBlank) continue;
+    total++;
+    if (l.hasComment) comments++;
+    for (const t of l.meaningful) {
+      if (t.type === 'keyword' && window.CodeLexer.CONTROL_FLOW.has(t.value)) control++;
+    }
+  }
+
+  const density = total > 0 ? control / total : 0;
+  const commentRatio = total > 0 ? comments / total : 0;
+
+  if (commentRatio > 0.25) return 'ambient';
+  if (density > 0.35) return 'synthwave';
+  if (/async|await|promise|fetch|http/i.test(text)) return 'synthwave';
+  if (/class |struct |impl |interface /i.test(text)) return 'piano';
+  if (total < 12) return 'piano';
+  return 'lofi';
+}
+
+/**
+ * 主入口：把源码变成完整的乐谱。
+ *
+ * 输出结构：
+ *   events    - 按时间排序的音符事件（供音频引擎调度）
+ *   lineMap   - 每一行对应的开始时间 / 该行触发的音符（供视觉同步）
+ *   duration  - 总时长（秒）
+ *   truncated - 是否因为太长被截断
+ */
+function compose(source, options = {}) {
+  const allLines = window.CodeLexer.tokenize(source);
+  const styleKey = options.style || detectMood(allLines);
+  const style = STYLES[styleKey];
+  const scale = SCALES[style.scale];
+
+  const bpm = options.bpm || style.bpm;
+  const secPerBeat = 60 / bpm;
+  // 一个 token = 一个十六分音符，这是全曲的时间栅格
+  const secPerStep = secPerBeat / 4;
+
+  const progression = PROGRESSIONS[styleKey] || PROGRESSIONS.lofi;
+  const events = [];
+  const lineMap = [];
+
+  // ── 长度护栏 ──
+  // 没有上限的话，一段压缩过的代码能生成 20 分钟的曲子和上万个振荡器，
+  // 浏览器会直接卡死。超过上限就只谱前一部分，并报告截断。
+  const MAX_LINES = 240;
+  const MAX_TOKENS_PER_LINE = 48;
+  const MAX_STEPS = Math.floor(48 * style.beatsPerBar * 4);  // 约 48 小节
+
+  const truncated = allLines.length > MAX_LINES;
+  const lines = truncated ? allLines.slice(0, MAX_LINES) : allLines;
+
+  // 统计缩进范围，用来把缩进映射到音域
+  let maxIndent = 0;
+  for (const l of lines) {
+    if (!l.isBlank && l.indent > maxIndent) maxIndent = l.indent;
+  }
+  // 缩进层级归一化到 0..1，避免极端缩进把旋律甩出音域
+  const indentSpan = Math.max(maxIndent, 8);
+
+  let step = 0;             // 全局十六分音符位置
+  let chordIndex = 0;
+  const beatsPerChord = style.beatsPerBar * style.barsPerChord;
+  const stepsPerChord = beatsPerChord * 4;
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    const lineStartStep = step;
+
+    // 到达小节上限就停，后面的行只进视觉不进音乐
+    if (step >= MAX_STEPS) {
+      lineMap.push({
+        lineNo: line.lineNo,
+        startStep: lineStartStep,
+        endStep: lineStartStep,
+        notes: [],
+        isRest: true,
+        isOverflow: true,
+      });
+      continue;
+    }
+
+    // 空行 = 休止，长度一个拍
+    if (line.isBlank) {
+      if (line.isCommentOnly) {
+        // 注释行不是静音：它变成一串很轻的高音，像心里默念的话。
+        // 这是全曲最柔软的地方，也是「代码有人味」的来源。
+        const curStep = step;
+        const commentText = line.tokens
+          .filter((t) => t.type === 'comment')
+          .map((t) => t.value)
+          .join(' ');
+
+        const notes = [];
+        // 每 3 个字出一个音，避免太密
+        const chars = commentText.replace(/[/*#\s]/g, '');
+        const noteCount = Math.min(6, Math.ceil(chars.length / 3));
+
+        for (let ci = 0; ci < noteCount; ci++) {
+          const hash = window.CodeLexer.hashString(chars.slice(ci * 3, ci * 3 + 3) || String(ci));
+          // 注释音放在主旋律之上一个八度，但要克制：
+          // 高出太多会变成刺耳的哨音，这里只比旋律平均音高高一点点。
+          const deg = (hash % scale.length) + scale.length;
+          const semi = snapToScale(degreeToSemitone(deg, scale), scale);
+          const note = {
+            kind: 'lead',
+            midi: style.root + semi + style.leadOctave * 12,
+            step: curStep + ci * 2,
+            durSteps: 2,
+            velocity: 0.22,
+            lineNo: line.lineNo,
+            tokenIndex: ci,
+            charStart: -1 - ci,   // 不与代码 token 冲突
+            charEnd: -1,
+            isComment: true,
+          };
+          events.push(note);
+          notes.push(note);
+        }
+
+        lineMap.push({
+          lineNo: line.lineNo,
+          startStep: curStep,
+          endStep: curStep + noteCount * 2,
+          notes,
+          isRest: false,
+          isComment: true,
+        });
+
+        step += noteCount * 2;
+        continue;
+      }
+
+      const restSteps = 4;
+      lineMap.push({
+        lineNo: line.lineNo,
+        startStep: lineStartStep,
+        endStep: step + restSteps,
+        notes: [],
+        isRest: true,
+      });
+      step += restSteps;
+      continue;
+    }
+
+    const level = Math.min(1, line.indent / indentSpan);
+    const lineNotes = [];
+
+    // 每行的和弦在换行时按小节推进
+    const chord = progression[Math.floor(step / stepsPerChord) % progression.length];
+
+    // ── 旋律：每个有意义的 token 出一次音 ──
+    // 超长单行（压缩过的代码）只取前 MAX_TOKENS_PER_LINE 个，
+    // 否则一行就够写出一首十分钟的曲子。
+    const melodyTokens = line.meaningful.length > MAX_TOKENS_PER_LINE
+      ? line.meaningful.slice(0, MAX_TOKENS_PER_LINE)
+      : line.meaningful;
+
+    let col = 0;
+    for (let ti = 0; ti < melodyTokens.length; ti++) {
+      const token = melodyTokens[ti];
+      const t = token.type;
+
+      // 时值由 token 长度决定：长名字拉长音，短符号变短促
+      const len = Math.max(1, Math.min(3, token.value.length));
+      const durSteps = t === 'string' ? 2 : Math.max(1, Math.min(2, len));
+
+      // 音高：缩进定八度，哈希定音级
+      // 哈希取模用 scale.length * 2，让旋律跨两个八度而不是圈在一个八度里 ——
+      // 音级太集中会让卷帘视觉上排成一条直线，听起来也闷。
+      const hash = window.CodeLexer.hashString(token.value);
+      const pHash = hash % (scale.length * 2);
+      // 缩进越深音越高，形成「越往里越往上爬」的听觉结构
+      const octaveOffset = Math.floor(level * 2.4);
+      let degree = pHash + octaveOffset * scale.length;
+
+      // 关键字往上顶一个音级（视觉上是亮的，听觉上也更突出）
+      if (t === 'keyword') degree += 1;
+      // 字符串压到中间声部，做「和声填充」
+      if (t === 'string') degree -= 1;
+
+      let semitone = degreeToSemitone(degree, scale);
+      semitone = snapToScale(semitone, scale);
+
+      const midi = style.root + semitone + style.leadOctave * 12;
+
+      // 力度：关键字和数字更响，符号更轻，形成自然的强弱起伏
+      let vel = style.velocityBase;
+      if (t === 'keyword') vel += 0.16;
+      else if (t === 'number') vel += 0.1;
+      else if (t === 'punct') vel -= 0.16;
+      else if (t === 'comment') vel -= 0.22;
+      vel = Math.max(0.16, Math.min(1, vel));
+
+      const note = {
+        kind: 'lead',
+        midi,
+        step: step + col,
+        durSteps,
+        velocity: vel,
+        lineNo: line.lineNo,
+        tokenIndex: ti,
+        // 记录字符位置，供代码高亮逐字同步
+        charStart: token.start,
+        charEnd: token.end,
+      };
+      events.push(note);
+      lineNotes.push(note);
+
+      col += durSteps;
+    }
+
+    // ── 伴奏：每行起点放一个和弦垫音 ──
+    // 只在和弦切换的那一行重新触发，避免每行都堆和弦造成浑浊
+    const chordStepIndex = Math.floor(step / stepsPerChord);
+    if (step % stepsPerChord === 0 || line.indent === 0) {
+      const padOctave = style.padOctave * 12;
+      const chordDur = Math.min(stepsPerChord, 16);
+      for (let ci = 0; ci < chord.length; ci++) {
+        const deg = chord[ci];
+        const semi = degreeToSemitone(deg, scale);
+        events.push({
+          kind: 'pad',
+          midi: style.root + semi + padOctave,
+          step: step,
+          durSteps: chordDur,
+          velocity: 0.3 - ci * 0.03,
+          lineNo: line.lineNo,
+        });
+      }
+    }
+
+    // ── 贝斯：每两行一次，落在根音 ──
+    if (li % 2 === 0) {
+      const rootDeg = chord[0];
+      const semi = degreeToSemitone(rootDeg, scale);
+      events.push({
+        kind: 'bass',
+        midi: style.root + semi - 24,
+        step: step,
+        durSteps: 6,
+        velocity: 0.42,
+        lineNo: line.lineNo,
+      });
+    }
+
+    // ── 鼓：由代码的行结构驱动 ──
+    if (style.drumPattern) {
+      const kicks = line.indent === 0 ? 2 : 1;
+      for (let k = 0; k < kicks; k++) {
+        events.push({
+          kind: 'drum',
+          drum: 'kick',
+          step: step + k * 8,
+          velocity: 0.7 - k * 0.12,
+          lineNo: line.lineNo,
+        });
+      }
+      // 符号密度决定踩镲密度
+      const hatDensity = Math.min(4, Math.ceil(line.meaningful.length / 4));
+      for (let h = 0; h < hatDensity; h++) {
+        events.push({
+          kind: 'drum',
+          drum: 'hat',
+          step: step + h * 4,
+          velocity: 0.2,
+          lineNo: line.lineNo,
+        });
+      }
+      // 缩进回落（离开函数体）时补一个军鼓
+      const prevIndent = li > 0 ? lines[li - 1].indent : 0;
+      if (line.indent < prevIndent && line.indent === 0) {
+        events.push({
+          kind: 'drum',
+          drum: 'snare',
+          step: step,
+          velocity: 0.55,
+          lineNo: line.lineNo,
+        });
+      }
+    }
+
+    step += Math.max(col, 4);
+    lineMap.push({
+      lineNo: line.lineNo,
+      startStep: lineStartStep,
+      endStep: step,
+      notes: lineNotes,
+      isRest: false,
+    });
+  }
+
+  // 收尾：最后一个和弦解决到主和弦，让曲子听起来是「结束」而不是「断掉」
+  const tailStart = step;
+  const finalChord = progression[0];
+  for (let ci = 0; ci < finalChord.length; ci++) {
+    const semi = degreeToSemitone(finalChord[ci], scale);
+    events.push({
+      kind: 'pad',
+      midi: style.root + semi + style.padOctave * 12,
+      step: tailStart,
+      durSteps: 16,
+      velocity: 0.28,
+      lineNo: -1,
+      isTail: true,
+    });
+  }
+  events.push({
+    kind: 'bass',
+    midi: style.root + degreeToSemitone(finalChord[0], scale) - 24,
+    step: tailStart,
+    durSteps: 16,
+    velocity: 0.38,
+    lineNo: -1,
+    isTail: true,
+  });
+
+  step += 16;
+
+  // 换算成秒，并按时间排序
+  const swingOffset = (s) => {
+    // 反拍轻微延后，制造 swing 的「歪」感
+    if (!style.swing) return 0;
+    return (s % 2 === 1) ? style.swing * secPerStep : 0;
+  };
+
+  for (const e of events) {
+    e.time = e.step * secPerStep + swingOffset(e.step);
+    e.duration = (e.durSteps || 1) * secPerStep;
+  }
+  events.sort((a, b) => a.time - b.time);
+
+  for (const lm of lineMap) {
+    lm.startTime = lm.startStep * secPerStep;
+    lm.endTime = lm.endStep * secPerStep;
+  }
+
+  return {
+    events,
+    lineMap,
+    styleKey,
+    style,
+    bpm,
+    secPerBeat,
+    secPerStep,
+    totalSteps: step,
+    duration: step * secPerStep,
+    lineCount: lines.length,
+    noteCount: events.filter((e) => e.kind === 'lead').length,
+    truncated,
+    totalLineCount: allLines.length,
+  };
+}
+
+window.CodeComposer = { compose, detectMood, STYLES, SCALES, PROGRESSIONS };
+
+
+/* ===== audio.js ===== */
+/**
+ * 音频引擎：完全用 WebAudio 合成，不加载任何音频文件。
+ *
+ * 这样做的两个理由：
+ *  1. 单文件发布，没有任何外部资源依赖，体验链接永远打得开。
+ *  2. 合成器可以按风格实时调参，换风格等于换音色，而不是换素材。
+ *
+ * 所有音色都走同一条链路：振荡器 → 包络 → 滤波器 → 混响/延迟 → 主输出。
+ */
+
+class AudioEngine {
+  constructor() {
+    this.ctx = null;
+    this.master = null;
+    this.compressor = null;
+    this.reverb = null;
+    this.delay = null;
+    this.scheduled = [];
+    this.isPlaying = false;
+    this.startTime = 0;
+  }
+
+  /** 必须由用户手势触发，否则浏览器会挂起 AudioContext。 */
+  init() {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+      return;
+    }
+
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new Ctx();
+
+    // 主链：压缩器兜底，防止多轨叠加爆音。
+    // threshold 压得比较低、ratio 拉高，因为这个合成器同屏可能叠 8 个音，
+    // 瞬态很容易冲破 0dB。
+    this.compressor = this.ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -22;
+    this.compressor.knee.value = 16;
+    this.compressor.ratio.value = 8;
+    this.compressor.attack.value = 0.003;
+    this.compressor.release.value = 0.18;
+
+    this.master = this.ctx.createGain();
+    // 目标整体响度约 -16 LUFS。master 抬高后靠压缩器压住峰值。
+    this.master.gain.value = 1.9;
+
+    // 末级限幅：压缩器之后再加一道软削波，确保绝对不过 0dB
+    this.limiter = this.ctx.createWaveShaper();
+    this.limiter.curve = this.makeTanhCurve(1.35);
+    this.limiter.oversample = '4x';
+
+    this.master.connect(this.compressor);
+    this.compressor.connect(this.limiter);
+    this.limiter.connect(this.ctx.destination);
+
+    this.reverb = this.createReverb();
+    this.delay = this.createDelay();
+  }
+
+  /** tanh 软削波曲线：接近满刻度时平滑压缩，而不是硬切。 */
+  makeTanhCurve(drive) {
+    const n = 2048;
+    const curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * drive);
+    }
+    return curve;
+  }
+
+  /** 用程序生成的脉冲响应做混响，避免引入音频文件。 */
+  createReverb() {
+    const seconds = 2.6;
+    const rate = this.ctx.sampleRate;
+    const length = Math.floor(rate * seconds);
+    const impulse = this.ctx.createBuffer(2, length, rate);
+
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        // 指数衰减 + 早期反射的稀疏感
+        const decay = Math.pow(1 - t, 2.6);
+        data[i] = (Math.random() * 2 - 1) * decay;
+      }
+    }
+
+    const conv = this.ctx.createConvolver();
+    conv.buffer = impulse;
+
+    const wet = this.ctx.createGain();
+    wet.gain.value = 0.28;
+    conv.connect(wet);
+    wet.connect(this.master);
+
+    return { node: conv, send: conv };
+  }
+
+  createDelay() {
+    const input = this.ctx.createGain();
+    const delayNode = this.ctx.createDelay(1.5);
+    delayNode.delayTime.value = 0.32;
+
+    const feedback = this.ctx.createGain();
+    feedback.gain.value = 0.26;
+
+    const wet = this.ctx.createGain();
+    wet.gain.value = 0.2;
+
+    // 反馈路径里插一个低通，让回声越来越暗，更像真实空间
+    const damp = this.ctx.createBiquadFilter();
+    damp.type = 'lowpass';
+    damp.frequency.value = 2200;
+
+    input.connect(delayNode);
+    delayNode.connect(damp);
+    damp.connect(feedback);
+    feedback.connect(delayNode);
+    damp.connect(wet);
+    wet.connect(this.master);
+
+    return { input, node: delayNode };
+  }
+
+  /** 通用 ADSR 包络。 */
+  envelope(param, t0, attack, decay, sustain, release, peak, endTime) {
+    param.cancelScheduledValues(t0);
+    param.setValueAtTime(0.0001, t0);
+    param.exponentialRampToValueAtTime(Math.max(0.0001, peak), t0 + attack);
+    param.exponentialRampToValueAtTime(
+      Math.max(0.0001, peak * sustain), t0 + attack + decay,
+    );
+    param.setValueAtTime(Math.max(0.0001, peak * sustain), Math.max(t0 + attack + decay, endTime));
+    param.exponentialRampToValueAtTime(0.0001, endTime + release);
+  }
+
+  midiToFreq(midi) {
+    return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+
+  /** 主旋律音色，按风格切换波形与滤波。 */
+  playLead(note, when, styleKey, dest) {
+    const ctx = this.ctx;
+    const freq = this.midiToFreq(note.midi);
+    const dur = Math.max(0.08, note.duration);
+    const vel = note.velocity;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    filter.type = 'lowpass';
+
+    switch (styleKey) {
+      case 'eightbit':
+        osc.type = 'square';
+        filter.frequency.value = 4200;
+        filter.Q.value = 1;
+        break;
+      case 'piano':
+        osc.type = 'triangle';
+        filter.frequency.setValueAtTime(5200, when);
+        filter.frequency.exponentialRampToValueAtTime(1800, when + dur);
+        filter.Q.value = 0.7;
+        break;
+      case 'ambient':
+        osc.type = 'sine';
+        filter.frequency.value = 2800;
+        filter.Q.value = 0.5;
+        break;
+      case 'synthwave':
+        osc.type = 'sawtooth';
+        filter.frequency.setValueAtTime(4200, when);
+        filter.frequency.exponentialRampToValueAtTime(1200, when + dur);
+        filter.Q.value = 6;
+        break;
+      default: // lofi
+        // 之前 1900Hz 的截止太暗，旋律在混音里不够清楚
+        osc.type = 'triangle';
+        filter.frequency.value = 2600;
+        filter.Q.value = 1.2;
+    }
+
+    osc.frequency.setValueAtTime(freq, when);
+
+    // 轻微的音高滑落，模拟真实乐器的起音。
+    // 用 linearRamp 而不是 exponentialRamp：后者不接受 0 作为目标值。
+    if (styleKey !== 'eightbit') {
+      osc.detune.setValueAtTime(8, when);
+      osc.detune.linearRampToValueAtTime(0, when + 0.06);
+    }
+
+    const attack = styleKey === 'ambient' ? 0.12 : styleKey === 'piano' ? 0.006 : 0.008;
+    const sustainLevel = styleKey === 'piano' ? 0.25 : 0.6;
+    const release = styleKey === 'ambient' ? 0.9 : styleKey === 'piano' ? 0.5 : 0.16;
+
+    this.envelope(gain.gain, when, attack, dur * 0.5, sustainLevel, release, vel * 0.5, when + dur);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest || this.master);
+
+    // 高八度泛音层：三角波缺高频，在笔记本扬声器上容易糊成一片。
+    // 补一层很轻的八度音，旋律的音头才清楚 —— 合成器里的常规做法。
+    if (styleKey !== 'eightbit') {
+      const shimmer = ctx.createOscillator();
+      const shimmerGain = ctx.createGain();
+      shimmer.type = styleKey === 'piano' ? 'sine' : 'triangle';
+      shimmer.frequency.setValueAtTime(freq * 2, when);
+      shimmerGain.gain.setValueAtTime(0.0001, when);
+      shimmerGain.gain.exponentialRampToValueAtTime(vel * 0.14, when + attack + 0.02);
+      shimmerGain.gain.exponentialRampToValueAtTime(0.0001, when + dur + release * 0.6);
+      shimmer.connect(shimmerGain);
+      shimmerGain.connect(dest || this.master);
+      shimmer.start(when);
+      shimmer.stop(when + dur + release + 0.1);
+      this.scheduled.push(shimmer);
+    }
+
+    // 混响发送量按风格调整：氛围类给更多空间
+    const sendAmount = styleKey === 'ambient' ? 0.55 : styleKey === 'piano' ? 0.32 : 0.14;
+    const send = ctx.createGain();
+    send.gain.value = sendAmount;
+    gain.connect(send);
+    send.connect(this.reverb.node);
+
+    osc.start(when);
+    osc.stop(when + dur + release + 0.1);
+    this.scheduled.push(osc);
+  }
+
+  /** 和弦垫音：两个失谐振荡器叠加，制造厚度。 */
+  playPad(note, when, styleKey) {
+    const ctx = this.ctx;
+    const freq = this.midiToFreq(note.midi);
+    const dur = Math.max(0.3, note.duration);
+
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = styleKey === 'ambient' ? 1400 : 1800;
+    filter.Q.value = 0.6;
+
+    const attack = styleKey === 'ambient' ? 0.6 : 0.14;
+    const release = styleKey === 'ambient' ? 1.6 : 0.7;
+    this.envelope(gain.gain, when, attack, dur * 0.3, 0.72, release, note.velocity * 0.34, when + dur);
+
+    for (const detune of [-6, 6]) {
+      const osc = ctx.createOscillator();
+      osc.type = styleKey === 'eightbit' ? 'square' : 'sawtooth';
+      osc.frequency.setValueAtTime(freq, when);
+      osc.detune.setValueAtTime(detune, when);
+      osc.connect(filter);
+      osc.start(when);
+      osc.stop(when + dur + release + 0.2);
+      this.scheduled.push(osc);
+    }
+
+    filter.connect(gain);
+    gain.connect(this.master);
+
+    const send = ctx.createGain();
+    send.gain.value = 0.45;
+    gain.connect(send);
+    send.connect(this.reverb.node);
+    if (styleKey === 'ambient') {
+      gain.connect(this.delay.input);
+    }
+  }
+
+  /** 贝斯：正弦打底 + 少量谐波，低频要稳且能被听出来。 */
+  playBass(note, when, styleKey) {
+    const ctx = this.ctx;
+    const freq = this.midiToFreq(note.midi);
+    const dur = Math.max(0.15, note.duration);
+
+    const osc = ctx.createOscillator();
+    const harm = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'sine';
+    // 加一个八度上的三角波，让贝斯在小喇叭上也能被听见 ——
+    // 纯正弦在笔记本扬声器上基本消失。
+    harm.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, when);
+    harm.frequency.setValueAtTime(freq * 2, when);
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 620;
+    filter.Q.value = 1.4;
+
+    // 谐波单独控音量，避免把低频弄浑
+    const harmGain = ctx.createGain();
+    harmGain.gain.value = 0.34;
+    harm.connect(harmGain);
+    harmGain.connect(filter);
+
+    this.envelope(gain.gain, when, 0.008, dur * 0.35, 0.62, 0.16, note.velocity * 0.82, when + dur);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+
+    osc.start(when); harm.start(when);
+    osc.stop(when + dur + 0.3); harm.stop(when + dur + 0.3);
+    this.scheduled.push(osc, harm);
+  }
+
+  /** 用噪声合成的鼓组，不需要采样。 */
+  playDrum(note, when, styleKey) {
+    const ctx = this.ctx;
+    const dur = note.drum === 'kick' ? 0.22 : note.drum === 'snare' ? 0.16 : 0.05;
+
+    if (note.drum === 'kick') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(130, when);
+      osc.frequency.exponentialRampToValueAtTime(42, when + 0.1);
+      gain.gain.setValueAtTime(note.velocity * 0.9, when);
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(when);
+      osc.stop(when + dur + 0.05);
+      this.scheduled.push(osc);
+      return;
+    }
+
+    // snare / hat 用短噪声
+    const bufferSize = Math.floor(ctx.sampleRate * dur);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+
+    if (note.drum === 'snare') {
+      filter.type = 'bandpass';
+      filter.frequency.value = 1900;
+      filter.Q.value = 0.8;
+      gain.gain.setValueAtTime(note.velocity * 0.4, when);
+    } else {
+      filter.type = 'highpass';
+      filter.frequency.value = 7200;
+      gain.gain.setValueAtTime(note.velocity * 0.32, when);
+    }
+
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+
+    if (note.drum === 'snare') {
+      const send = ctx.createGain();
+      send.gain.value = 0.3;
+      gain.connect(send);
+      send.connect(this.reverb.node);
+    }
+
+    src.start(when);
+    this.scheduled.push(src);
+  }
+
+  /**
+   * 调度整首曲子。
+   * lookahead 提前量避免 setTimeout 抖动影响节拍精度。
+   */
+  play(score, options = {}) {
+    this.init();
+    this.stop();
+
+    const startAt = this.ctx.currentTime + 0.12;
+    this.startTime = startAt;
+    this.isPlaying = true;
+
+    const styleKey = score.styleKey;
+
+    for (const e of score.events) {
+      const when = startAt + e.time;
+      switch (e.kind) {
+        case 'lead': this.playLead(e, when, styleKey); break;
+        case 'pad': this.playPad(e, when, styleKey); break;
+        case 'bass': this.playBass(e, when, styleKey); break;
+        case 'drum': this.playDrum(e, when, styleKey); break;
+      }
+    }
+
+    return startAt;
+  }
+
+  /** 当前播放位置（秒），供视觉同步。 */
+  currentTime() {
+    if (!this.ctx || !this.isPlaying) return 0;
+    return Math.max(0, this.ctx.currentTime - this.startTime);
+  }
+
+  stop() {
+    for (const node of this.scheduled) {
+      try { node.stop(0); } catch (e) { /* 已停止的节点忽略 */ }
+    }
+    this.scheduled = [];
+    this.isPlaying = false;
+  }
+
+  setVolume(v) {
+    if (this.master) {
+      this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
+    }
+  }
+}
+
+window.CodeAudio = new AudioEngine();
+
+
+/* ===== visualizer.js ===== */
+/**
+ * 视觉层：代码滚动 + token 高亮 + 钢琴卷帘 + 流动频谱。
+ *
+ * 同步策略：音频是唯一时间基准。视觉每帧用 audio.currentTime() 反查
+ * 当前落在哪个 step，再由此决定高亮与卷帘位置。绝不用 rAF 累加时间，
+ * 因为那会和音频时钟漂移，几秒后就能看出错位。
+ */
+
+class Visualizer {
+  constructor(codeEl, canvasEl) {
+    this.codeEl = codeEl;
+    this.canvas = canvasEl;
+    this.ctx = canvasEl.getContext('2d');
+
+    this.score = null;
+    this.lineEls = [];
+    this.tokenIndex = new Map();
+    this.analyser = null;
+    this.freqData = null;
+    this.timeData = null;
+    this.rafId = null;
+    this.activeLine = -1;
+    this.tokenSpans = [];
+    this.smoothLevels = new Float32Array(96);
+    this.resize();
+
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    this.canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.cssWidth = rect.width;
+    this.cssHeight = rect.height;
+  }
+
+  /** 把源码渲染成可高亮的 span 结构。 */
+  renderCode(source) {
+    const lines = window.CodeLexer.tokenize(source);
+    this.codeEl.innerHTML = '';
+    this.lineEls = [];
+    this.tokenSpans = [];
+
+    const frag = document.createDocumentFragment();
+
+    for (const line of lines) {
+      const row = document.createElement('div');
+      row.className = 'cl-row';
+      row.dataset.line = String(line.lineNo);
+
+      const gutter = document.createElement('span');
+      gutter.className = 'cl-gutter';
+      gutter.textContent = String(line.lineNo + 1);
+      row.appendChild(gutter);
+
+      const body = document.createElement('span');
+      body.className = 'cl-body';
+
+      if (line.raw.length === 0) {
+        body.innerHTML = '&nbsp;';
+      } else {
+        for (const tok of line.tokens) {
+          if (tok.type === 'space') {
+            body.appendChild(document.createTextNode(tok.value));
+            continue;
+          }
+          const span = document.createElement('span');
+          span.className = `tk tk-${tok.type}`;
+          span.textContent = tok.value;
+          span.dataset.start = String(tok.start);
+          body.appendChild(span);
+          this.tokenSpans.push(span);
+        }
+      }
+
+      row.appendChild(body);
+      frag.appendChild(row);
+      this.lineEls.push(row);
+    }
+
+    this.codeEl.appendChild(frag);
+
+    // 预先建 charStart → 元素索引。播放时每帧要查几十个 token，
+    // 实时 querySelector 会明显掉帧。
+    this.tokenIndex = new Map();
+    for (const row of this.lineEls) {
+      const lineNo = Number(row.dataset.line);
+      for (const span of row.querySelectorAll('[data-start]')) {
+        this.tokenIndex.set(`${lineNo}:${span.dataset.start}`, span);
+      }
+    }
+  }
+
+  /** 把音频分析器接到画布数据源。 */
+  attachAnalyser(analyser) {
+    this.analyser = analyser;
+    this.freqData = new Uint8Array(analyser.frequencyBinCount);
+    this.timeData = new Uint8Array(analyser.fftSize);
+  }
+
+  setScore(score) {
+    this.score = score;
+    this.smoothLevels = new Float32Array(96);
+  }
+
+  /** 按当前播放时间推进视觉。 */
+  update(time) {
+    if (!this.score) {
+      this.drawIdle(time);
+      return;
+    }
+
+    const secPerStep = this.score.secPerStep;
+    const currentStep = time / secPerStep;
+    const lineMap = this.score.lineMap;
+
+    // 二分查找当前行。
+    // 被截断的溢出行为零长度（startStep === endStep），永远匹配不到，
+    // 所以查找时显式跳过零长度行，避免播放到尾段时高亮跳到错误位置。
+    let lo = 0;
+    let hi = lineMap.length - 1;
+    let idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const lm = lineMap[mid];
+      if (lm.endStep <= lm.startStep) {
+        // 零长度行：比较后用 startStep 作为分界继续找
+        if (currentStep < lm.startStep) hi = mid - 1;
+        else lo = mid + 1;
+        continue;
+      }
+      if (currentStep < lm.startStep) hi = mid - 1;
+      else if (currentStep >= lm.endStep) lo = mid + 1;
+      else { idx = mid; break; }
+    }
+
+    if (idx !== this.activeLine) {
+      if (this.activeLine >= 0 && this.lineEls[this.activeLine]) {
+        this.lineEls[this.activeLine].classList.remove('is-active');
+      }
+      this.activeLine = idx;
+      if (idx >= 0 && this.lineEls[idx]) {
+        const el = this.lineEls[idx];
+        el.classList.add('is-active');
+        this.scrollTo(el);
+      }
+    }
+
+    if (idx >= 0) {
+      const lm = lineMap[idx];
+      for (const note of lm.notes) {
+        if (note.step > currentStep) break;
+        // 注释音没有对应的 DOM 元素（charStart 为负），跳过即可
+        if (note.charStart < 0) continue;
+        const el = this.tokenIndex.get(`${note.lineNo}:${note.charStart}`);
+        if (el && !el.classList.contains('is-hit')) {
+          el.classList.add('is-hit');
+        }
+      }
+      if (idx > 0 && this.lineEls[idx - 1]) {
+        this.lineEls[idx - 1].querySelectorAll('.is-hit')
+          .forEach((e) => e.classList.remove('is-hit'));
+      }
+    }
+
+    this.drawPianoRoll(time, currentStep);
+  }
+
+  scrollTo(el) {
+    const container = this.codeEl;
+    const targetTop = el.offsetTop - container.clientHeight * 0.36;
+    container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+  }
+
+  /**
+   * 钢琴卷帘：横轴是时间，纵轴是音高，颜色区分声部。
+   *
+   * 这比频谱柱更有说服力 —— 观众能亲眼看到「这一行代码在这个时刻
+   * 产生了这个音高的音」，因果关系是可见的，不是装饰。
+   */
+  drawPianoRoll(time, currentStep) {
+    const ctx = this.ctx;
+    const w = this.cssWidth;
+    const h = this.cssHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    const score = this.score;
+    const events = score.events;
+
+    // 布局：上方留出标题区，下方留给时间轴
+    const padTop = h * 0.30;
+    const padBottom = 30;
+    const plotH = h - padTop - padBottom;
+    const plotW = w - 24;
+
+    // 音高范围
+    let minMidi = 127;
+    let maxMidi = 0;
+    for (const e of events) {
+      if (e.kind === 'drum') continue;
+      if (e.midi < minMidi) minMidi = e.midi;
+      if (e.midi > maxMidi) maxMidi = e.midi;
+    }
+    minMidi -= 2;
+    maxMidi += 2;
+    const midiSpan = Math.max(12, maxMidi - minMidi);
+
+    // 时间窗口：播放头固定在左侧 26% 处，右侧不断滚入新音符。
+    // 固定播放头位置比让播放头跑动更好读 —— 视线不用追着线走。
+    const windowSec = 7;
+    const headRatio = 0.26;
+    const t0 = time - windowSec * headRatio;
+    const t1 = t0 + windowSec;
+
+    const xOf = (t) => 12 + ((t - t0) / (t1 - t0)) * plotW;
+    const yOf = (m) => padTop + plotH - ((m - minMidi) / midiSpan) * plotH;
+
+    // 音高网格线
+    ctx.strokeStyle = 'rgba(120, 160, 200, 0.055)';
+    ctx.lineWidth = 1;
+    const gridLines = 7;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = padTop + (plotH / gridLines) * i;
+      ctx.beginPath();
+      ctx.moveTo(12, y);
+      ctx.lineTo(12 + plotW, y);
+      ctx.stroke();
+    }
+
+    // 拍线
+    const secPerBeat = score.secPerBeat;
+    const firstBeat = Math.ceil(t0 / secPerBeat) * secPerBeat;
+    for (let t = firstBeat; t < t1; t += secPerBeat) {
+      const x = xOf(t);
+      if (x < 12 || x > 12 + plotW) continue;
+      ctx.strokeStyle = 'rgba(120, 160, 200, 0.05)';
+      ctx.beginPath();
+      ctx.moveTo(x, padTop);
+      ctx.lineTo(x, padTop + plotH);
+      ctx.stroke();
+    }
+
+    // 当前时刻参考线
+    const playX = xOf(time);
+    if (playX >= 12 && playX <= 12 + plotW) {
+      const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
+      grad.addColorStop(0, 'rgba(88, 214, 190, 0.05)');
+      grad.addColorStop(0.5, 'rgba(88, 214, 190, 0.5)');
+      grad.addColorStop(1, 'rgba(88, 214, 190, 0.05)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(playX, padTop);
+      ctx.lineTo(playX, padTop + plotH);
+      ctx.stroke();
+    }
+
+    // 画音符
+    const KIND_COLOR = {
+      lead: { a: 'rgba(88, 214, 190, ', b: 'rgba(120, 240, 210, ' },
+      pad: { a: 'rgba(124, 180, 255, ', b: 'rgba(150, 200, 255, ' },
+      bass: { a: 'rgba(190, 150, 255, ', b: 'rgba(210, 175, 255, ' },
+    };
+
+    for (const e of events) {
+      const tStart = e.time;
+      const tEnd = e.time + e.duration;
+
+      // 只画落在窗口内的音符
+      if (tEnd < t0 || tStart > t1) continue;
+
+      if (e.kind === 'drum') {
+        // 鼓点：贴底的短竖条，用亮度表示力度
+        const x = xOf(tStart);
+        if (x < 12 || x > 12 + plotW) continue;
+        const kick = e.drum === 'kick';
+        const bh = kick ? 13 : (e.drum === 'snare' ? 9 : 5);
+        const alpha = 0.2 + e.velocity * 0.55;
+        ctx.fillStyle = `rgba(120, 180, 255, ${alpha})`;
+        ctx.fillRect(x - 1, padTop + plotH + 6, 2, bh);
+        continue;
+      }
+
+      const colors = KIND_COLOR[e.kind] || KIND_COLOR.lead;
+      const x = Math.max(12, xOf(tStart));
+      const right = Math.min(12 + plotW, xOf(tEnd));
+      const noteW = Math.max(3, right - x);
+
+      // 高度：旋律音按力度和声部缩放
+      const baseH = e.kind === 'lead' ? 7 : e.kind === 'pad' ? 5 : 6;
+      const nh = baseH + e.velocity * 6;
+
+      const y = yOf(e.midi) - nh / 2;
+
+      // 是否正在发声：决定亮度
+      const isSounding = time >= tStart && time <= tEnd + 0.06;
+      const isPast = time > tEnd + 0.06;
+
+      let alpha;
+      if (isSounding) alpha = 1;
+      else if (isPast) alpha = 0.34;
+      else alpha = 0.62;
+
+      if (isSounding) {
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = colors.b + '0.85)';
+      } else {
+        ctx.shadowBlur = 0;
+      }
+
+      const g = ctx.createLinearGradient(x, y, x, y + nh);
+      g.addColorStop(0, colors.b + alpha + ')');
+      g.addColorStop(1, colors.a + (alpha * 0.72) + ')');
+      ctx.fillStyle = g;
+
+      ctx.beginPath();
+      ctx.roundRect(x, y, noteW, nh, Math.min(3, nh / 2));
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+    }
+
+    // 底部频谱：真实的低频律动，压在鼓点下面做氛围
+    this.drawSpectrumStrip(padTop + plotH + 26, h - 6);
+  }
+
+  drawSpectrumStrip(top, bottom) {
+    if (!this.analyser) return;
+    this.analyser.getByteFrequencyData(this.freqData);
+
+    const ctx = this.ctx;
+    const w = this.cssWidth;
+    const bars = 96;
+    const barW = (w - 24) / bars;
+    const maxH = Math.max(4, bottom - top);
+
+    for (let i = 0; i < bars; i++) {
+      const srcIdx = Math.floor(Math.pow(i / bars, 1.6) * this.freqData.length);
+      const raw = this.freqData[srcIdx] / 255;
+      // 时间平滑，避免柱子抖动得像故障
+      this.smoothLevels[i] += (raw - this.smoothLevels[i]) * 0.34;
+      const v = this.smoothLevels[i];
+      if (v < 0.02) continue;
+
+      const bh = Math.max(1.5, v * maxH);
+      const alpha = 0.14 + v * 0.42;
+      ctx.fillStyle = `rgba(88, 214, 190, ${alpha})`;
+      ctx.fillRect(12 + i * barW, bottom - bh, Math.max(1, barW - 1.2), bh);
+    }
+  }
+
+  /** 未播放时的静态展示：显示整首曲子的轮廓，像一张乐谱缩略图。 */
+  drawIdle(time) {
+    const ctx = this.ctx;
+    const w = this.cssWidth;
+    const h = this.cssHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    if (!this.score) {
+      // 没有任何乐谱时，画一条缓慢呼吸的基线
+      const y = h * 0.55;
+      ctx.strokeStyle = 'rgba(88, 214, 190, 0.10)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0; x <= w; x += 4) {
+        const yy = y + Math.sin(x * 0.014 + time * 0.8) * 5 * Math.sin(x * 0.003);
+        if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+      return;
+    }
+
+    // 有乐谱但没播放：画全景缩略图
+    const events = this.score.events;
+    const padTop = h * 0.24;
+    const padBottom = 38;
+    const plotH = h - padTop - padBottom;
+    const plotW = w - 24;
+    const total = this.score.duration || 1;
+
+    let minMidi = 127;
+    let maxMidi = 0;
+    for (const e of events) {
+      if (e.kind === 'drum') continue;
+      if (e.midi < minMidi) minMidi = e.midi;
+      if (e.midi > maxMidi) maxMidi = e.midi;
+    }
+    minMidi -= 2; maxMidi += 2;
+    const midiSpan = Math.max(12, maxMidi - minMidi);
+
+    const xOf = (t) => 12 + (t / total) * plotW;
+    const yOf = (m) => padTop + plotH - ((m - minMidi) / midiSpan) * plotH;
+
+    for (const e of events) {
+      if (e.kind === 'drum') {
+        // 缩略图里鼓点单独画在底部条带上
+        const x = xOf(e.time);
+        const kick = e.drum === 'kick';
+        const bh = kick ? 8 : (e.drum === 'snare' ? 6 : 4);
+        ctx.fillStyle = `rgba(120, 180, 255, ${0.15 + e.velocity * 0.3})`;
+        ctx.fillRect(x - 0.8, padTop + plotH + 10, 1.6, bh);
+        continue;
+      }
+      const colors = e.kind === 'lead'
+        ? 'rgba(88, 214, 190, '
+        : e.kind === 'pad' ? 'rgba(124, 180, 255, ' : 'rgba(190, 150, 255, ';
+      const x = xOf(e.time);
+      const right = xOf(e.time + e.duration);
+      const noteW = Math.max(3, right - x);
+      const nh = e.kind === 'lead' ? 5 : 4;
+      const y = yOf(e.midi) - nh / 2;
+
+      // 缓慢呼吸的透明度，暗示「等待被播放」
+      const breathe = 0.62 + 0.16 * Math.sin(time * 1.1 + x * 0.02);
+      ctx.fillStyle = colors + breathe + ')';
+      ctx.beginPath();
+      ctx.roundRect(x, y, noteW, nh, 1.5);
+      ctx.fill();
+    }
+
+    // 顶部一条细线，暗示时间轴
+    ctx.strokeStyle = 'rgba(120, 160, 200, 0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(12, padTop + plotH + 8);
+    ctx.lineTo(12 + plotW, padTop + plotH + 8);
+    ctx.stroke();
+
+    // 首尾标记，让缩略图有明确的起点和终点
+    ctx.fillStyle = 'rgba(88, 214, 190, 0.55)';
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillText('0:00', 12, padTop + plotH + 30);
+    const endLabel = `${Math.floor(total / 60)}:${String(Math.floor(total % 60)).padStart(2, '0')}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(endLabel, 12 + plotW, padTop + plotH + 30);
+    ctx.textAlign = 'left';
+  }
+
+  /** 播放结束后复位高亮。 */
+  reset() {
+    for (const el of this.lineEls) {
+      el.classList.remove('is-active', 'is-hit');
+    }
+    if (this.tokenIndex) {
+      for (const span of this.tokenIndex.values()) span.classList.remove('is-hit');
+    }
+    this.activeLine = -1;
+    this.codeEl.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  startLoop(getTime) {
+    const loop = () => {
+      this.update(getTime());
+      this.rafId = requestAnimationFrame(loop);
+    };
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.rafId = requestAnimationFrame(loop);
+  }
+
+  stopLoop() {
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.rafId = null;
+  }
+}
+
+window.CodeVisualizer = Visualizer;
+
+
+/* ===== exporter.js ===== */
+/**
+ * 导出层：把生成的曲子渲染成 WAV，把乐谱画成分享海报。
+ *
+ * 音频导出不复用实时 AudioContext —— 必须用 OfflineAudioContext 离屏渲染，
+ * 才能保证导出的是完整、稳定、可重复的结果，不受实时播放卡顿影响。
+ */
+
+class Exporter {
+  constructor() {
+    this.exporting = false;
+  }
+
+  /** 按当前乐谱离屏渲染成 AudioBuffer。 */
+  async renderBuffer(score, onProgress) {
+    const sampleRate = 44100;
+    const tail = 2.2;                       // 留出混响尾巴
+    const duration = score.duration + tail;
+    const length = Math.ceil(sampleRate * duration);
+    const oac = new OfflineAudioContext(2, length, sampleRate);
+
+    // 与实时引擎保持一致的主链
+    const master = oac.createGain();
+    master.gain.value = 1.9;
+
+    const comp = oac.createDynamicsCompressor();
+    comp.threshold.value = -22;
+    comp.knee.value = 16;
+    comp.ratio.value = 8;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.18;
+
+    const limiter = oac.createWaveShaper();
+    const n = 2048;
+    const curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * 1.35);
+    }
+    limiter.curve = curve;
+    limiter.oversample = '4x';
+
+    master.connect(comp);
+    comp.connect(limiter);
+    limiter.connect(oac.destination);
+
+    // 混响
+    const revLen = Math.floor(sampleRate * 2.6);
+    const impulse = oac.createBuffer(2, revLen, sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const data = impulse.getChannelData(c);
+      for (let i = 0; i < revLen; i++) {
+        const t = i / revLen;
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.6);
+      }
+    }
+    const conv = oac.createConvolver();
+    conv.buffer = impulse;
+    const revWet = oac.createGain();
+    revWet.gain.value = 0.28;
+    conv.connect(revWet);
+    revWet.connect(master);
+
+    const midiToFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    const styleKey = score.styleKey;
+
+    const events = score.events;
+    for (let ei = 0; ei < events.length; ei++) {
+      const e = events[ei];
+      const when = e.time + 0.05;
+
+      if (e.kind === 'lead') this._lead(oac, e, when, styleKey, master, conv, midiToFreq, sampleRate);
+      else if (e.kind === 'pad') this._pad(oac, e, when, styleKey, master, conv, midiToFreq);
+      else if (e.kind === 'bass') this._bass(oac, e, when, master, midiToFreq);
+      else if (e.kind === 'drum') this._drum(oac, e, when, master, sampleRate);
+    }
+
+    if (onProgress) onProgress(0.35);
+    const rendered = await oac.startRendering();
+    if (onProgress) onProgress(1);
+    return rendered;
+  }
+
+  _lead(oac, e, when, styleKey, master, conv, midiToFreq, sampleRate) {
+    const osc = oac.createOscillator();
+    const gain = oac.createGain();
+    const filter = oac.createBiquadFilter();
+    filter.type = 'lowpass';
+
+    if (styleKey === 'eightbit') { osc.type = 'square'; filter.frequency.value = 4200; }
+    else if (styleKey === 'piano') { osc.type = 'triangle'; filter.frequency.value = 5200; }
+    else if (styleKey === 'ambient') { osc.type = 'sine'; filter.frequency.value = 2800; }
+    else if (styleKey === 'synthwave') { osc.type = 'sawtooth'; filter.frequency.value = 4200; }
+    else { osc.type = 'triangle'; filter.frequency.value = 2600; }
+    filter.Q.value = 1;
+
+    osc.frequency.value = midiToFreq(e.midi);
+
+    const dur = Math.max(0.08, e.duration);
+    const peak = e.velocity * 0.5;
+
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), when + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.18);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+
+    const send = oac.createGain();
+    send.gain.value = styleKey === 'ambient' ? 0.55 : styleKey === 'piano' ? 0.32 : 0.14;
+    gain.connect(send);
+    send.connect(conv);
+
+    osc.start(when);
+    osc.stop(when + dur + 0.25);
+
+    // 高八度泛音
+    if (styleKey !== 'eightbit') {
+      const sh = oac.createOscillator();
+      const shg = oac.createGain();
+      sh.type = styleKey === 'piano' ? 'sine' : 'triangle';
+      sh.frequency.value = midiToFreq(e.midi) * 2;
+      shg.gain.setValueAtTime(0.0001, when);
+      shg.gain.exponentialRampToValueAtTime(Math.max(0.0001, e.velocity * 0.14), when + 0.03);
+      shg.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.15);
+      sh.connect(shg);
+      shg.connect(master);
+      sh.start(when);
+      sh.stop(when + dur + 0.2);
+    }
+  }
+
+  _pad(oac, e, when, styleKey, master, conv, midiToFreq) {
+    const gain = oac.createGain();
+    const filter = oac.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = styleKey === 'ambient' ? 1400 : 1800;
+    filter.Q.value = 0.6;
+
+    const dur = Math.max(0.3, e.duration);
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, e.velocity * 0.34), when + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.5);
+
+    for (const detune of [-6, 6]) {
+      const o = oac.createOscillator();
+      o.type = styleKey === 'eightbit' ? 'square' : 'sawtooth';
+      o.frequency.value = midiToFreq(e.midi);
+      o.detune.value = detune;
+      o.connect(filter);
+      o.start(when);
+      o.stop(when + dur + 0.6);
+    }
+
+    filter.connect(gain);
+    gain.connect(master);
+
+    const send = oac.createGain();
+    send.gain.value = 0.45;
+    gain.connect(send);
+    send.connect(conv);
+  }
+
+  _bass(oac, e, when, master, midiToFreq) {
+    const osc = oac.createOscillator();
+    const harm = oac.createOscillator();
+    const gain = oac.createGain();
+    const filter = oac.createBiquadFilter();
+
+    osc.type = 'sine';
+    harm.type = 'triangle';
+    osc.frequency.value = midiToFreq(e.midi);
+    harm.frequency.value = midiToFreq(e.midi) * 2;
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 620;
+    filter.Q.value = 1.4;
+
+    const harmGain = oac.createGain();
+    harmGain.gain.value = 0.34;
+    harm.connect(harmGain);
+    harmGain.connect(filter);
+
+    const dur = Math.max(0.15, e.duration);
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, e.velocity * 0.82), when + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.2);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+
+    osc.start(when); harm.start(when);
+    osc.stop(when + dur + 0.3); harm.stop(when + dur + 0.3);
+  }
+
+  _drum(oac, e, when, master, sampleRate) {
+    if (e.drum === 'kick') {
+      const o = oac.createOscillator();
+      const g = oac.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(130, when);
+      o.frequency.exponentialRampToValueAtTime(42, when + 0.1);
+      g.gain.setValueAtTime(Math.max(0.0001, e.velocity * 0.9), when);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+      o.connect(g);
+      g.connect(master);
+      o.start(when);
+      o.stop(when + 0.25);
+      return;
+    }
+
+    const dur = e.drum === 'snare' ? 0.16 : 0.05;
+    const bs = Math.floor(sampleRate * dur);
+    const buf = oac.createBuffer(1, bs, sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bs; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = oac.createBufferSource();
+    src.buffer = buf;
+
+    const f = oac.createBiquadFilter();
+    const g = oac.createGain();
+
+    if (e.drum === 'snare') {
+      f.type = 'bandpass';
+      f.frequency.value = 1900;
+      f.Q.value = 0.8;
+      g.gain.setValueAtTime(Math.max(0.0001, e.velocity * 0.4), when);
+    } else {
+      f.type = 'highpass';
+      f.frequency.value = 7200;
+      g.gain.setValueAtTime(Math.max(0.0001, e.velocity * 0.32), when);
+    }
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+
+    src.connect(f);
+    f.connect(g);
+    g.connect(master);
+    src.start(when);
+  }
+
+  /** AudioBuffer → 16bit PCM WAV Blob。 */
+  bufferToWav(buffer) {
+    const numCh = buffer.numberOfChannels;
+    const len = buffer.length;
+    const sampleRate = buffer.sampleRate;
+    const bytesPerSample = 2;
+    const blockAlign = numCh * bytesPerSample;
+    const dataSize = len * blockAlign;
+
+    const ab = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(ab);
+
+    const writeStr = (offset, str) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numCh, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    const channels = [];
+    for (let c = 0; c < numCh; c++) channels.push(buffer.getChannelData(c));
+
+    let offset = 44;
+    for (let i = 0; i < len; i++) {
+      for (let c = 0; c < numCh; c++) {
+        const s = Math.max(-1, Math.min(1, channels[c][i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        offset += 2;
+      }
+    }
+
+    return new Blob([ab], { type: 'audio/wav' });
+  }
+
+  async downloadAudio(score, filename, onStatus) {
+    if (this.exporting) return;
+    this.exporting = true;
+    try {
+      if (onStatus) onStatus('正在渲染音频…');
+      const buffer = await this.renderBuffer(score);
+      if (onStatus) onStatus('正在编码 WAV…');
+      const blob = this.bufferToWav(buffer);
+      this._saveBlob(blob, filename);
+      if (onStatus) onStatus('音频已保存');
+    } finally {
+      this.exporting = false;
+    }
+  }
+
+  /**
+   * 生成分享海报。
+   * 设计目标：一张图讲清「这是什么」——
+   * 左边代码、右边乐谱、底部一行说明。发到社交平台不需配字也看得懂。
+   */
+  drawPoster(score, sourceCode, meta) {
+    const W = 1200;
+    const H = 1460;
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // 背景
+    const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+    bgGrad.addColorStop(0, '#0a0d14');
+    bgGrad.addColorStop(0.5, '#0d1220');
+    bgGrad.addColorStop(1, '#0a0d14');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // 光晕
+    const glow1 = ctx.createRadialGradient(200, 60, 0, 200, 60, 620);
+    glow1.addColorStop(0, 'rgba(88,214,190,0.20)');
+    glow1.addColorStop(1, 'rgba(88,214,190,0)');
+    ctx.fillStyle = glow1;
+    ctx.fillRect(0, 0, W, H);
+
+    const glow2 = ctx.createRadialGradient(1050, 240, 0, 1050, 240, 560);
+    glow2.addColorStop(0, 'rgba(124,180,255,0.16)');
+    glow2.addColorStop(1, 'rgba(124,180,255,0)');
+    ctx.fillStyle = glow2;
+    ctx.fillRect(0, 0, W, H);
+
+    // ── 顶部品牌 ──
+    ctx.fillStyle = '#58d6be';
+    ctx.font = '600 30px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillText('♪  代码有声', 80, 108);
+
+    ctx.fillStyle = 'rgba(107,122,143,0.9)';
+    ctx.font = '400 18px ui-monospace, Consolas, monospace';
+    ctx.fillText('CODEPHILHARMONIC', 288, 106);
+
+    // ── 标题 ──
+    const title = meta.title || 'Untitled Code';
+    const titleGrad = ctx.createLinearGradient(80, 0, 700, 0);
+    titleGrad.addColorStop(0, '#ffffff');
+    titleGrad.addColorStop(0.6, '#58d6be');
+    titleGrad.addColorStop(1, '#7cb4ff');
+    ctx.fillStyle = titleGrad;
+
+    // 标题过长时缩小字号，避免溢出
+    let titleSize = 76;
+    ctx.font = `700 ${titleSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    while (ctx.measureText(title).width > W - 160 && titleSize > 34) {
+      titleSize -= 4;
+      ctx.font = `700 ${titleSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    }
+    ctx.fillText(title, 80, 216);
+
+    // 副标题
+    ctx.fillStyle = 'rgba(152,168,189,0.95)';
+    ctx.font = '400 24px "PingFang SC", "Microsoft YaHei", sans-serif';
+    const sub = `${meta.styleName} · ${score.bpm} BPM · ${meta.keyName} · ${meta.duration} · ${score.noteCount} 个音符`;
+    ctx.fillText(sub, 80, 262);
+
+    // ── 左：代码片段 ──
+    const codeX = 80;
+    const codeY = 330;
+    const codeW = 500;
+    const codeH = 520;
+
+    ctx.fillStyle = 'rgba(19,24,35,0.72)';
+    this._roundRect(ctx, codeX, codeY, codeW, codeH, 16);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,160,200,0.14)';
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, codeX, codeY, codeW, codeH, 16);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(107,122,143,0.85)';
+    ctx.font = '500 15px ui-monospace, Consolas, monospace';
+    ctx.fillText('SOURCE', codeX + 26, codeY + 38);
+
+    // 代码正文：行数按框内可用高度算，避免溢出到框外
+    const lineH = 26;
+    const codeTop = codeY + 82;
+    const codeBottom = codeY + codeH - 26;
+    const maxCodeLines = Math.max(4, Math.floor((codeBottom - codeTop) / lineH));
+    const lines = sourceCode.split(/\r?\n/).slice(0, maxCodeLines);
+    ctx.font = '400 17px ui-monospace, Consolas, monospace';
+    let ly = codeTop;
+
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i];
+      const trimmed = raw.trim();
+
+      let color = 'rgba(207,224,245,0.9)';
+      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('#')) {
+        color = 'rgba(77,92,110,0.95)';
+      }
+
+      ctx.fillStyle = 'rgba(51,64,79,0.9)';
+      ctx.fillText(String(i + 1).padStart(2, ' '), codeX + 22, ly);
+
+      ctx.fillStyle = color;
+      // 超长行截断并加省略号
+      let text = raw.length > 40 ? raw.slice(0, 38) + '…' : raw;
+      ctx.fillText(text, codeX + 56, ly);
+      ly += lineH;
+    }
+
+    if (sourceCode.split(/\r?\n/).length > maxCodeLines) {
+      ctx.fillStyle = 'rgba(107,122,143,0.7)';
+      ctx.font = '400 15px ui-monospace, Consolas, monospace';
+      ctx.fillText('…', codeX + 56, ly + 4);
+    }
+
+    // ── 右：乐谱缩略图 ──
+    const rollX = 620;
+    const rollY = 330;
+    const rollW = 500;
+    const rollH = 520;
+
+    ctx.fillStyle = 'rgba(19,24,35,0.72)';
+    this._roundRect(ctx, rollX, rollY, rollW, rollH, 16);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,160,200,0.14)';
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, rollX, rollY, rollW, rollH, 16);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(107,122,143,0.85)';
+    ctx.font = '500 15px ui-monospace, Consolas, monospace';
+    ctx.fillText('SCORE', rollX + 26, rollY + 38);
+
+    // 画音符
+    const plotX = rollX + 26;
+    const plotY = rollY + 70;
+    const plotW = rollW - 52;
+    const plotH = rollH - 130;
+
+    const events = score.events;
+    let minMidi = 127;
+    let maxMidi = 0;
+    for (const e of events) {
+      if (e.kind === 'drum') continue;
+      if (e.midi < minMidi) minMidi = e.midi;
+      if (e.midi > maxMidi) maxMidi = e.midi;
+    }
+    minMidi -= 2;
+    maxMidi += 2;
+    const midiSpan = Math.max(12, maxMidi - minMidi);
+    const total = score.duration || 1;
+
+    // 网格
+    ctx.strokeStyle = 'rgba(120,160,200,0.06)';
+    for (let i = 0; i <= 6; i++) {
+      const y = plotY + (plotH / 6) * i;
+      ctx.beginPath();
+      ctx.moveTo(plotX, y);
+      ctx.lineTo(plotX + plotW, y);
+      ctx.stroke();
+    }
+
+    for (const e of events) {
+      if (e.kind === 'drum') continue;
+      const x = plotX + (e.time / total) * plotW;
+      const w = Math.max(3, (e.duration / total) * plotW);
+      const y = plotY + plotH - ((e.midi - minMidi) / midiSpan) * plotH;
+      const nh = e.kind === 'lead' ? 7 : 5;
+
+      let color;
+      if (e.kind === 'lead') color = 'rgba(88,214,190,0.92)';
+      else if (e.kind === 'pad') color = 'rgba(124,180,255,0.72)';
+      else color = 'rgba(190,150,255,0.78)';
+
+      ctx.fillStyle = color;
+      this._roundRect(ctx, x, y - nh / 2, w, nh, 2.5);
+      ctx.fill();
+    }
+
+    // 底部时间轴
+    ctx.strokeStyle = 'rgba(120,160,200,0.14)';
+    ctx.beginPath();
+    ctx.moveTo(plotX, plotY + plotH + 22);
+    ctx.lineTo(plotX + plotW, plotY + plotH + 22);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(107,122,143,0.85)';
+    ctx.font = '400 14px ui-monospace, Consolas, monospace';
+    ctx.fillText('0:00', plotX, plotY + plotH + 50);
+    ctx.textAlign = 'right';
+    ctx.fillText(meta.duration, plotX + plotW, plotY + plotH + 50);
+    ctx.textAlign = 'left';
+
+    // ── 映射说明 ──
+    const mapY = 916;
+    ctx.fillStyle = 'rgba(107,122,143,0.9)';
+    ctx.font = '500 16px ui-monospace, Consolas, monospace';
+    ctx.fillText('HOW CODE BECOMES MUSIC', 80, mapY);
+
+    const rules = [
+      ['缩进', '音高，越深越高'],
+      ['标识符', '音级，同名同音'],
+      ['关键字', '重音，更亮更响'],
+      ['空行', '呼吸，休止与延音'],
+    ];
+
+    ctx.font = '400 21px "PingFang SC", "Microsoft YaHei", sans-serif';
+    for (let i = 0; i < rules.length; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const x = 80 + col * 540;
+      const y = mapY + 56 + row * 52;
+
+      ctx.fillStyle = 'rgba(220,228,240,0.95)';
+      ctx.font = '600 21px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillText(rules[i][0], x, y);
+
+      ctx.fillStyle = 'rgba(88,214,190,0.7)';
+      ctx.font = '400 20px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillText('→', x + 92, y);
+
+      ctx.fillStyle = 'rgba(152,168,189,0.95)';
+      ctx.font = '400 20px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillText(rules[i][1], x + 126, y);
+    }
+
+    // ── 底部一句话 ──
+    const quoteY = 1136;
+    ctx.fillStyle = 'rgba(88,214,190,0.10)';
+    this._roundRect(ctx, 80, quoteY, W - 160, 118, 14);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(88,214,190,0.22)';
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, 80, quoteY, W - 160, 118, 14);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(220,228,240,0.96)';
+    ctx.font = '400 27px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillText('每一段代码，都有它自己的旋律。', 112, quoteY + 50);
+
+    ctx.fillStyle = 'rgba(107,122,143,0.9)';
+    ctx.font = '400 20px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillText('粘贴你的代码，听听它是什么声音。', 112, quoteY + 88);
+
+    // ── 底部技术说明，填住引语卡到页脚之间的空档 ──
+    const techY = quoteY + 158;
+    const voices = [
+      ['#58d6be', '旋律', 'Lead'],
+      ['#7cb4ff', '和声', 'Pad'],
+      ['#be96ff', '低音', 'Bass'],
+      ['#78b4ff', '鼓点', 'Drums'],
+    ];
+    ctx.font = '400 18px "PingFang SC", "Microsoft YaHei", sans-serif';
+    let vx = 84;
+    for (const [color, cn, en] of voices) {
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.85;
+      this._roundRect(ctx, vx, techY - 12, 12, 12, 3);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = 'rgba(152,168,189,0.85)';
+      ctx.fillText(cn, vx + 22, techY);
+
+      ctx.fillStyle = 'rgba(70,84,102,0.9)';
+      ctx.font = '400 13px ui-monospace, Consolas, monospace';
+      ctx.fillText(en.toUpperCase(), vx + 22, techY + 20);
+      ctx.font = '400 18px "PingFang SC", "Microsoft YaHei", sans-serif';
+
+      vx += 190;
+    }
+
+    // 右侧技术栈说明
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(58,70,86,0.85)';
+    ctx.font = '400 15px ui-monospace, Consolas, monospace';
+    ctx.fillText('纯 WebAudio 合成 · 无采样 · 无依赖', W - 84, techY);
+    ctx.fillText('单个 HTML 文件即可运行', W - 84, techY + 24);
+    ctx.textAlign = 'left';
+
+    // ── 页脚 ──
+    ctx.fillStyle = 'rgba(70,84,102,0.9)';
+    ctx.font = '400 17px ui-monospace, Consolas, monospace';
+    ctx.fillText('#WorkBuddy  #1024程序员节', 84, H - 22);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(58,70,86,0.85)';
+    ctx.fillText('made with WebAudio', W - 84, H - 22);
+    ctx.textAlign = 'left';
+
+    return canvas;
+  }
+
+  _roundRect(ctx, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+    ctx.lineTo(x + w, y + h - rr);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+    ctx.lineTo(x + rr, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+    ctx.lineTo(x, y + rr);
+    ctx.quadraticCurveTo(x, y, x + rr, y);
+    ctx.closePath();
+  }
+
+  async downloadPoster(score, sourceCode, meta, filename) {
+    const canvas = this.drawPoster(score, sourceCode, meta);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    this._saveBlob(blob, filename);
+  }
+
+  _saveBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 稍后回收，避免下载被中断
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+}
+
+window.CodeExporter = new Exporter();
+
+
+/* ===== app.js ===== */
+/**
+ * 应用主逻辑：串联输入 → 谱曲 → 播放 → 视觉同步。
+ */
+
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  const els = {
+    source: $('source'),
+    codeView: $('code-view'),
+    btnCompose: $('btn-compose'),
+    btnPlay: $('btn-play'),
+    btnRestart: $('btn-restart'),
+    btnShuffle: $('btn-shuffle'),
+    btnHelp: $('btn-help'),
+    helpModal: $('help-modal'),
+    helpClose: $('help-close'),
+    playGlyph: $('play-glyph'),
+    spectrum: $('spectrum'),
+    progressFill: $('progress-fill'),
+    timeCur: $('time-cur'),
+    timeTotal: $('time-total'),
+    volume: $('volume'),
+    stylePicker: $('style-picker'),
+    metaLines: $('meta-lines'),
+    metaNotes: $('meta-notes'),
+    metaStyle: $('meta-style'),
+    metaBpm: $('meta-bpm'),
+    npTitle: $('np-title'),
+    npSub: $('np-sub'),
+    statLines: $('stat-lines'),
+    statNotes: $('stat-notes'),
+    statDur: $('stat-dur'),
+    statKey: $('stat-key'),
+    statBars: $('stat-bars'),
+    anIndent: $('an-indent'),
+    anRange: $('an-range'),
+    anComment: $('an-comment'),
+    anVel: $('an-vel'),
+    btnPoster: $('btn-poster'),
+    btnAudio: $('btn-audio'),
+  };
+
+  /** 文件名里不能有路径分隔符等字符。 */
+  function sanitize(name) {
+    return String(name).replace(/[\\/:*?"<>|]/g, '-').slice(0, 60) || 'untitled';
+  }
+
+  const state = {
+    score: null,
+    style: 'auto',
+    playing: false,
+    rafId: null,
+    lastComposed: null,
+  };
+
+  const viz = new window.CodeVisualizer(els.codeView, els.spectrum);
+
+  // ── 示例代码：默认内容，也用作「换一段」 ──
+  const SAMPLES = [
+    {
+      title: 'useRecursiveHeart',
+      code: `/**
+ * 每一层递归都是一次心动。
+ * 缩进越深，心跳越快。
+ */
+function useRecursiveHeart(depth, limit = 8) {
+  if (depth <= 0) return null;
+
+  const beat = {
+    love: true,
+    fear: false,
+    bpm: 60 + depth * 4,
+  };
+
+  // 空行会让旋律喘一口气
+  beat.child = useRecursiveHeart(depth - 1, limit);
+
+  if (beat.child === null) {
+    beat.isLeaf = true;
+    beat.message = '终于到底了';
+  }
+
+  return beat;
+}
+
+export default useRecursiveHeart;`,
+    },
+    {
+      title: 'renderStars',
+      code: `const renderStars = (sky, count = 1000) => {
+  const stars = [];
+
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * sky.width;
+    const y = Math.random() * sky.height;
+    const size = Math.random() * 2 + 0.5;
+
+    stars.push({ x, y, size, twinkle: true });
+  }
+
+  // 暗的先画，亮的后画
+  stars.sort((a, b) => a.size - b.size);
+
+  return stars.map((star) => ({
+    ...star,
+    opacity: 0.3 + star.size * 0.35,
+    color: star.size > 1.8 ? '#ffffff' : '#8fb4ff',
+  }));
+};`,
+    },
+    {
+      title: 'fly',
+      code: `async function fly(sky) {
+  await sky.load();
+  const wind = await sky.getWind();
+
+  try {
+    while (sky.altitude < sky.ceiling) {
+      sky.climb(wind.speed * 0.8);
+
+      // 云层之上，天永远是蓝的
+      if (sky.altitude > 3000) {
+        sky.enterStratosphere();
+      }
+
+      if (sky.fuel < 0.1) {
+        break;
+      }
+    }
+  } catch (err) {
+    console.error('坠落', err);
+    return null;
+  } finally {
+    sky.land();
+  }
+
+  return sky.position;
+}`,
+    },
+    {
+      title: 'Whale',
+      code: `class Whale {
+  constructor(name, weight) {
+    this.name = name;
+    this.weight = weight;
+    this.blubber = 0.4;
+    this.depth = 0;
+  }
+
+  sing(freq = 52) {
+    // 鲸歌能传很远
+    return this.emit(freq, {
+      duration: 12,
+      depth: 'abyss',
+    });
+  }
+
+  dive(target) {
+    if (target > 2000) {
+      throw new Error('太深了');
+    }
+
+    this.depth = target;
+    return this.sing();
+  }
+
+  get buoyancy() {
+    return this.blubber * 2.4;
+  }
+}`,
+    },
+  ];
+
+  // ── 初始化：载入第一段示例并自动谱一首 ──
+  function boot() {
+    const first = SAMPLES[0];
+    els.source.value = first.code;
+    updateMetaPreview();
+    composeAndRender({ autoplay: false });
+  }
+
+  function updateMetaPreview() {
+    const text = els.source.value;
+    const lines = text.split(/\r?\n/);
+    const nonBlank = lines.filter((l) => l.trim().length > 0).length;
+    els.metaLines.textContent = `${nonBlank} 行`;
+    els.statLines.textContent = String(nonBlank);
+  }
+
+  // ── 谱曲 ──
+  function composeAndRender(opts = {}) {
+    const src = els.source.value;
+    if (!src.trim()) {
+      // 清空旧乐谱，否则界面会继续显示上一段代码的结果，看起来像没反应
+      state.score = null;
+      viz.setScore(null);
+      viz.renderCode('');
+      els.npTitle.textContent = '还没有代码';
+      els.npSub.textContent = '先粘贴一段代码，再点「谱曲并播放」';
+      els.metaStyle.textContent = '—';
+      els.metaBpm.textContent = '— BPM';
+      els.metaNotes.textContent = '— 音符';
+      els.statNotes.textContent = '0';
+      els.statDur.textContent = '0:00';
+      els.statBars.textContent = '0';
+      els.progressFill.style.width = '0%';
+      els.timeCur.textContent = '0:00';
+      els.timeTotal.textContent = '0:00';
+      els.anIndent.textContent = '—';
+      els.anRange.textContent = '—';
+      els.anComment.textContent = '—';
+      els.anVel.textContent = '—';
+      if (state.playing) pause();
+      return;
+    }
+
+    const options = {};
+    if (state.style !== 'auto') options.style = state.style;
+
+    const score = window.CodeComposer.compose(src, options);
+    state.score = score;
+
+    // 视觉：渲染带高亮的代码
+    viz.lineEls = [];
+    viz.renderCode(src);
+    viz.setScore(score);
+
+    // 元信息
+    const styleName = score.style.name;
+    els.metaStyle.textContent = styleName;
+    els.metaBpm.textContent = `${score.bpm} BPM`;
+    els.metaNotes.textContent = `${score.noteCount} 音符`;
+    els.statKey.textContent = keyLabel(score);
+
+    els.statNotes.textContent = String(score.noteCount);
+    els.statDur.textContent = fmtTime(score.duration);
+    els.statBars.textContent = String(Math.ceil(score.totalSteps / (score.style.beatsPerBar * 4)));
+    els.statLines.textContent = String(score.lineCount);
+    els.metaLines.textContent = `${score.lineCount} 行`;
+    els.timeTotal.textContent = fmtTime(score.duration);
+
+    updateAnalysis(src, score);
+
+    // 标题：用第一个函数名或类名，让作品有名字
+    els.npTitle.textContent = pickTitle(src);
+
+    if (score.truncated) {
+      els.npSub.textContent =
+        `${styleName} · 代码太长，已为前 ${score.lineCount} 行谱曲（共 ${score.totalLineCount} 行）`;
+    } else if (score.duration >= 60) {
+      els.npSub.textContent =
+        `${styleName} · 由 ${score.lineCount} 行代码生成 · 约 ${Math.round(score.duration / 60)} 分钟`;
+    } else {
+      els.npSub.textContent = `${styleName} · 由 ${score.lineCount} 行代码生成`;
+    }
+
+    els.progressFill.style.width = '0%';
+    els.timeCur.textContent = '0:00';
+
+    if (opts.autoplay) play();
+  }
+
+  function pickTitle(src) {
+    const fn = src.match(/(?:function|def|fn|func)\s+([A-Za-z_$][\w$]*)/);
+    if (fn) return fn[1];
+    const cls = src.match(/class\s+([A-Za-z_$][\w$]*)/);
+    if (cls) return cls[1];
+    const arrow = src.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/);
+    if (arrow) return arrow[1];
+    return 'Untitled Code';
+  }
+
+  /** 把代码的统计特征摆出来，让「映射」这件事可被验证。 */
+  function updateAnalysis(src, score) {
+    const lines = window.CodeLexer.tokenize(src);
+
+    let maxIndent = 0;
+    let commentLines = 0;
+    let totalLines = 0;
+    for (const l of lines) {
+      // 注释行也算进分母：它是有内容的，只是内容是注释
+      if (l.isBlank && !l.hasComment) continue;
+      totalLines++;
+      if (l.hasComment) commentLines++;
+      if (l.indent > maxIndent) maxIndent = l.indent;
+    }
+
+    const leads = score.events.filter((e) => e.kind === 'lead');
+    const midis = leads.map((e) => e.midi);
+    const range = midis.length
+      ? `${Math.min(...midis)} – ${Math.max(...midis)}`
+      : '—';
+    const avgVel = leads.length
+      ? Math.round((leads.reduce((a, e) => a + e.velocity, 0) / leads.length) * 100)
+      : 0;
+    const commentRatio = totalLines ? Math.round((commentLines / totalLines) * 100) : 0;
+
+    els.anIndent.textContent = `${maxIndent} 格`;
+    els.anRange.textContent = range;
+    els.anComment.textContent = `${commentRatio}%`;
+    els.anVel.textContent = `${avgVel}%`;
+  }
+
+  function keyLabel(score) {
+    const roots = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const rootName = roots[score.style.root % 12];
+    const scaleName = {
+      pentatonicMajor: '五声大调',
+      pentatonicMinor: '五声小调',
+      major: '大调',
+      minor: '小调',
+      dorian: '多利亚',
+      lydian: '利底亚',
+    }[score.style.scale] || '调式';
+    return `${rootName} ${scaleName}`;
+  }
+
+  function fmtTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  // ── 播放控制 ──
+  function play() {
+    if (!state.score) {
+      composeAndRender({ autoplay: true });
+      return;
+    }
+
+    const audio = window.CodeAudio;
+    audio.init();
+
+    if (!viz.analyser) {
+      const analyser = audio.ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.76;
+      audio.compressor.connect(analyser);
+      viz.attachAnalyser(analyser);
+    }
+
+    audio.play(state.score);
+    state.playing = true;
+    els.playGlyph.textContent = '❚❚';
+    els.codeView.classList.remove('hidden');
+    els.source.classList.add('hidden');
+
+    viz.reset();
+    startClock();
+  }
+
+  function pause() {
+    window.CodeAudio.stop();
+    state.playing = false;
+    els.playGlyph.textContent = '▶';
+    viz.stopLoop();
+  }
+
+  function restart() {
+    pause();
+    viz.reset();
+    requestAnimationFrame(() => play());
+  }
+
+  function startClock() {
+    viz.stopLoop();
+    const audio = window.CodeAudio;
+
+    const tick = () => {
+      const t = audio.currentTime();
+      const total = state.score ? state.score.duration : 1;
+
+      if (t >= total) {
+        // 播放结束
+        els.progressFill.style.width = '100%';
+        els.timeCur.textContent = fmtTime(total);
+        viz.update(total);
+        setTimeout(() => {
+          state.playing = false;
+          els.playGlyph.textContent = '▶';
+          els.codeView.classList.add('hidden');
+          els.source.classList.remove('hidden');
+          viz.reset();
+        }, 700);
+        return;
+      }
+
+      viz.update(t);
+      els.progressFill.style.width = `${(t / total) * 100}%`;
+      els.timeCur.textContent = fmtTime(t);
+      state.rafId = requestAnimationFrame(tick);
+    };
+
+    state.rafId = requestAnimationFrame(tick);
+  }
+
+  // ── 事件绑定 ──
+  els.btnCompose.addEventListener('click', () => {
+    composeAndRender({ autoplay: true });
+  });
+
+  els.btnPlay.addEventListener('click', () => {
+    if (state.playing) {
+      pause();
+      els.codeView.classList.add('hidden');
+      els.source.classList.remove('hidden');
+    } else {
+      play();
+    }
+  });
+
+  els.btnRestart.addEventListener('click', restart);
+
+  els.btnShuffle.addEventListener('click', () => {
+    const cur = els.source.value;
+    const others = SAMPLES.filter((s) => s.code !== cur);
+    const pick = others[Math.floor(Math.random() * others.length)] || SAMPLES[0];
+    els.source.value = pick.code;
+    pause();
+    els.codeView.classList.add('hidden');
+    els.source.classList.remove('hidden');
+    updateMetaPreview();
+    composeAndRender({ autoplay: true });
+  });
+
+  els.btnHelp.addEventListener('click', () => els.helpModal.classList.remove('hidden'));
+  els.helpClose.addEventListener('click', () => els.helpModal.classList.add('hidden'));
+  els.helpModal.addEventListener('click', (e) => {
+    if (e.target === els.helpModal) els.helpModal.classList.add('hidden');
+  });
+
+  els.stylePicker.addEventListener('click', (e) => {
+    const chip = e.target.closest('.style-chip');
+    if (!chip) return;
+    els.stylePicker.querySelectorAll('.style-chip').forEach((c) => c.classList.remove('is-on'));
+    chip.classList.add('is-on');
+    state.style = chip.dataset.style;
+
+    // 换风格立即重谱，保持播放状态
+    const wasPlaying = state.playing;
+    pause();
+    els.codeView.classList.add('hidden');
+    els.source.classList.remove('hidden');
+    composeAndRender({ autoplay: wasPlaying });
+  });
+
+  els.volume.addEventListener('input', (e) => {
+    window.CodeAudio.setVolume(e.target.value / 100);
+  });
+
+  // ── 导出 ──
+  els.btnPoster.addEventListener('click', async () => {
+    if (!state.score) return;
+    const meta = {
+      title: els.npTitle.textContent,
+      styleName: state.score.style.name,
+      keyName: keyLabel(state.score),
+      duration: fmtTime(state.score.duration),
+    };
+    await window.CodeExporter.downloadPoster(
+      state.score, els.source.value, meta, `code-music-${sanitize(meta.title)}.png`,
+    );
+  });
+
+  els.btnAudio.addEventListener('click', async () => {
+    if (!state.score) return;
+    const wasPlaying = state.playing;
+    if (wasPlaying) {
+      pause();
+      els.codeView.classList.add('hidden');
+      els.source.classList.remove('hidden');
+    }
+
+    els.btnAudio.disabled = true;
+    const original = els.btnAudio.innerHTML;
+    els.btnAudio.innerHTML = '<span class="ico">⋯</span> 渲染中';
+
+    try {
+      await window.CodeExporter.downloadAudio(
+        state.score,
+        `code-music-${sanitize(els.npTitle.textContent)}.wav`,
+        (msg) => { els.btnAudio.innerHTML = `<span class="ico">⋯</span> ${msg}`; },
+      );
+    } catch (err) {
+      console.error(err);
+      els.btnAudio.innerHTML = '<span class="ico">!</span> 导出失败';
+      setTimeout(() => { els.btnAudio.innerHTML = original; }, 1800);
+      return;
+    }
+
+    els.btnAudio.innerHTML = '<span class="ico">✓</span> 已保存';
+    setTimeout(() => {
+      els.btnAudio.innerHTML = original;
+      els.btnAudio.disabled = false;
+    }, 1600);
+  });
+
+  // 输入时实时更新行数提示（不谱曲，避免打字时卡顿）
+  let inputTimer = null;
+  els.source.addEventListener('input', () => {
+    updateMetaPreview();
+    clearTimeout(inputTimer);
+    inputTimer = setTimeout(() => {
+      if (state.playing) return;
+      // 空输入时不要覆盖「还没有代码」的提示
+      if (!els.source.value.trim()) return;
+      els.npSub.textContent = '代码已修改，点「谱曲并播放」听新的版本';
+    }, 600);
+  });
+
+  // 键盘快捷键：空格播放/暂停
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      els.btnPlay.click();
+    }
+    if (e.key === 'Escape') {
+      els.helpModal.classList.add('hidden');
+    }
+  });
+
+  // 页面隐藏时暂停，避免后台空转
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state.playing) {
+      pause();
+      els.codeView.classList.add('hidden');
+      els.source.classList.remove('hidden');
+    }
+  });
+
+  // ── 空闲渲染循环：未播放时画全景缩略图 ──
+  let idleRaf = null;
+  function startIdleLoop() {
+    if (idleRaf) return;
+    const t0 = performance.now();
+    const loop = () => {
+      if (!state.playing) {
+        // 用真实流逝时间驱动呼吸，但只走缩略图分支，不推进播放头
+        viz.drawIdle((performance.now() - t0) / 1000);
+      }
+      idleRaf = requestAnimationFrame(loop);
+    };
+    idleRaf = requestAnimationFrame(loop);
+  }
+
+  // 启动
+  boot();
+  startIdleLoop();
+
+  // 暴露给调试与截图脚本
+  window.__app = { state, viz, composeAndRender, play };
+})();
+
+</script>
+</body>
+</html>
